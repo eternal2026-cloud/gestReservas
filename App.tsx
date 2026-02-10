@@ -1,961 +1,823 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { api } from './services/api';
-import { User, Amenity, Reservation, Post, Community } from './types';
-import { Layout } from './components/Layout';
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import * as api from './services/api';
+import type { User, Community, Amenity, Reservation, Post, ThemeMode, AppView } from './types';
+import { getUserLevel, POINT_ACTIONS } from './types';
+import { supabase } from './services/supabase';
 
-// --- Data ---
-const AMENITIES: Amenity[] = [
-    { 
-        id: 1, 
-        name: "Piscina Panorámica", 
-        capacity: 12, 
-        pointsReward: 50,
-        description: "Borde infinito con vista a la ciudad. Horario exclusivo adultos: 20:00 - 23:00.",
-        image: "https://images.unsplash.com/photo-1572331165267-854da2b00cc6?q=80&w=800&auto=format&fit=crop" 
-    },
-    { 
-        id: 2, 
-        name: "Gimnasio Tech", 
-        capacity: 8, 
-        pointsReward: 30,
-        description: "Equipamiento cardiovascular y de fuerza. Acceso con huella.",
-        image: "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?q=80&w=800&auto=format&fit=crop" 
-    },
-    { 
-        id: 3, 
-        name: "Zona Parrillas", 
-        capacity: 25, 
-        pointsReward: 100,
-        description: "Quincho equipado para eventos sociales. Incluye limpieza.",
-        image: "https://images.unsplash.com/photo-1555529733-0e670560f7e1?q=80&w=800&auto=format&fit=crop" 
-    },
-    { 
-        id: 4, 
-        name: "Coworking", 
-        capacity: 10, 
-        pointsReward: 20,
-        description: "Espacio silencioso con WiFi de alta velocidad.",
-        image: "https://images.unsplash.com/photo-1497366216548-37526070297c?q=80&w=800&auto=format&fit=crop" 
-    }
-];
+// ─── Context ───
+interface AppCtx {
+    user: User | null;
+    setUser: (u: User | null) => void;
+    theme: ThemeMode;
+    toggleTheme: () => void;
+    view: AppView;
+    go: (v: AppView, data?: any) => void;
+    viewData: any;
+    toast: (msg: string) => void;
+}
+const Ctx = createContext<AppCtx>({} as AppCtx);
+const useApp = () => useContext(Ctx);
 
-const MOCK_REVIEWS = [
-    { id: 1, user: "Ana Maria", rating: 5, text: "¡La vista es increíble al atardecer!", date: "Hace 2 días", avatar: "A" },
-    { id: 2, user: "Carlos D.", rating: 4, text: "Muy limpio, pero el agua estaba un poco fría.", date: "Hace 1 semana", avatar: "C" },
-];
+// ─── Toast ───
+function Toast({ msg, onClose }: { msg: string; onClose: () => void }) {
+    useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, []);
+    return <div className="toast">{msg}</div>;
+}
 
-const MOCK_LEADERBOARD: User[] = [
-    { email: '1', name: 'Sofia Rodriguez', role: 'USER', tower: 'Torre A', apartment: 'PH', points: 2450, level: 'Vecino Destacado', avatar: 'https://i.pravatar.cc/150?u=1' },
-    { email: '2', name: 'Diego Morales', role: 'USER', tower: 'Torre A', apartment: '402', points: 1890, level: 'Colaborador', avatar: 'https://i.pravatar.cc/150?u=2' },
-    { email: '3', name: 'Valentina P.', role: 'USER', tower: 'Torre A', apartment: '805', points: 1200, level: 'Vecino Activo', avatar: 'https://i.pravatar.cc/150?u=3' },
-];
+// ─── App Shell ───
+export default function App() {
+    const [user, setUser] = useState<User | null>(null);
+    const [theme, setTheme] = useState<ThemeMode>(() =>
+        (localStorage.getItem('roomly-theme') as ThemeMode) || 'dark'
+    );
+    const [view, setView] = useState<AppView>('login');
+    const [viewData, setViewData] = useState<any>(null);
+    const [toastMsg, setToastMsg] = useState('');
 
-// --- Components ---
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('roomly-theme', theme);
+    }, [theme]);
 
-const TowerAnimation = () => (
-    <div className="flex items-end justify-center gap-2 h-32 mb-6">
-        <div className="tower-building text-white/40">
-            <div className="tower-window" style={{top: '20%', left: '20%', animationDelay: '0.2s'}}></div>
-            <div className="tower-window" style={{top: '50%', right: '20%', animationDelay: '1.5s'}}></div>
+    const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
+    const go = (v: AppView, data?: any) => { setView(v); setViewData(data); window.scrollTo(0, 0); };
+    const toast = (msg: string) => setToastMsg(msg);
+
+    const ctx: AppCtx = { user, setUser, theme, toggleTheme, view, go, viewData, toast };
+
+    return (
+        <Ctx.Provider value={ctx}>
+            <div className="app-container">
+                {view === 'login' ? <LoginPage /> : (
+                    <>
+                        <TopBar />
+                        <div className="main-content">
+                            {view === 'home' && <HomePage />}
+                            {view === 'amenities' && <AmenitiesPage />}
+                            {view === 'amenity-detail' && <AmenityDetailPage />}
+                            {view === 'booking' && <BookingPage />}
+                            {view === 'my-reservations' && <MyReservationsPage />}
+                            {view === 'community' && <CommunityPage />}
+                            {view === 'leaderboard' && <LeaderboardPage />}
+                            {view === 'profile' && <ProfilePage />}
+                            {view === 'join-community' && <JoinCommunityPage />}
+                            {view === 'admin' && <AdminPage />}
+                        </div>
+                        <BottomNav />
+                    </>
+                )}
+                {toastMsg && <Toast msg={toastMsg} onClose={() => setToastMsg('')} />}
+            </div>
+        </Ctx.Provider>
+    );
+}
+
+// ─── TopBar ───
+function TopBar() {
+    const { toggleTheme, theme, go, user } = useApp();
+    return (
+        <div className="top-bar">
+            <div className="logo">
+                <div className="logo-icon"><span className="material-symbols-outlined" style={{ color: '#fff', fontSize: 20 }}>apartment</span></div>
+                <span className="logo-text">Roomly</span>
+            </div>
+            <div className="top-bar-actions">
+                <button className="icon-btn" onClick={toggleTheme}>
+                    <span className="material-symbols-outlined">{theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
+                </button>
+                {user?.role === 'ADMIN' && (
+                    <button className="icon-btn" onClick={() => go('admin')}>
+                        <span className="material-symbols-outlined">admin_panel_settings</span>
+                    </button>
+                )}
+            </div>
         </div>
-        <div className="tower-building text-white/60 h-48 w-20">
-            <div className="tower-window" style={{top: '10%', left: '30%', animationDelay: '0.8s'}}></div>
-            <div className="tower-window" style={{top: '70%', left: '30%', animationDelay: '2.2s'}}></div>
-        </div>
-        <div className="tower-building text-white/40">
-             <div className="tower-window" style={{top: '30%', right: '30%', animationDelay: '0.5s'}}></div>
-        </div>
-    </div>
-);
+    );
+}
 
-// --- Pages ---
+// ─── BottomNav ───
+function BottomNav() {
+    const { view, go } = useApp();
+    const items: { icon: string; label: string; view: AppView }[] = [
+        { icon: 'home', label: 'Inicio', view: 'home' },
+        { icon: 'search', label: 'Espacios', view: 'amenities' },
+        { icon: 'calendar_month', label: 'Reservas', view: 'my-reservations' },
+        { icon: 'groups', label: 'Comunidad', view: 'community' },
+        { icon: 'person', label: 'Perfil', view: 'profile' },
+    ];
+    return (
+        <div className="bottom-nav">
+            {items.map(i => (
+                <button key={i.view} className={`nav-item ${view === i.view ? 'active' : ''}`} onClick={() => go(i.view)}>
+                    <span className="material-symbols-outlined">{i.icon}</span>
+                    {i.label}
+                </button>
+            ))}
+        </div>
+    );
+}
 
-const LoginPage = ({ onLogin, onRegisterTower, onJoinCommunity }: { onLogin: (u: User) => void, onRegisterTower: () => void, onJoinCommunity: () => void }) => {
+// ─── LoginPage ───
+function LoginPage() {
+    const { setUser, go } = useApp();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [name, setName] = useState('');
+    const [isRegister, setIsRegister] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
-        if(!email) {
-            onLogin({
-                email: 'demo@roomly.app',
-                name: 'Vecino Demo',
-                role: 'USER',
-                tower: 'Torre A',
-                apartment: '101',
-                points: 500,
-                level: 'Nuevo'
-            });
-            return;
+        setError('');
+        try {
+            if (isRegister) {
+                await api.signUp(email, password);
+                const authUser = await api.getCurrentAuthUser();
+                if (authUser) {
+                    const profile = await api.createUserProfile({
+                        auth_id: authUser.id, email, name, role: 'USER', points: 0, status: 'ACTIVO'
+                    });
+                    setUser(profile);
+                }
+            } else {
+                await api.signIn(email, password);
+                const authUser = await api.getCurrentAuthUser();
+                if (authUser) {
+                    let profile = await api.getUserByAuthId(authUser.id);
+                    if (!profile) profile = await api.getUserByEmail(email);
+                    if (profile) setUser(profile);
+                    else {
+                        const newProfile = await api.createUserProfile({
+                            auth_id: authUser.id, email, name: email.split('@')[0],
+                            role: 'USER', points: 0, status: 'ACTIVO'
+                        });
+                        setUser(newProfile);
+                    }
+                }
+            }
+            go('home');
+        } catch (err: any) {
+            setError(err.message || 'Error de autenticación');
         }
-        const res = await api.login(email, password);
         setLoading(false);
-        if (res.success && res.user) onLogin(res.user);
-        else alert(res.error || "Credenciales incorrectas");
+    };
+
+    // Quick login for demo (no auth needed)
+    const demoLogin = async (role: 'USER' | 'ADMIN') => {
+        setLoading(true);
+        try {
+            const demoEmail = role === 'ADMIN' ? 'admin@roomly.com' : 'vecino@roomly.com';
+            const profile = await api.getUserByEmail(demoEmail);
+            if (profile) { setUser(profile); go('home'); }
+            else setError('No se encontró usuario demo. Verifica la BD.');
+        } catch { setError('Error conectando con Supabase'); }
+        setLoading(false);
     };
 
     return (
-        <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden">
-            {/* Video Background */}
-            <video 
-                autoPlay 
-                muted 
-                loop 
-                className="absolute inset-0 w-full h-full object-cover z-0 filter brightness-50"
-            >
-                <source src="https://videos.pexels.com/video-files/1739010/1739010-hd_1920_1080_30fps.mp4" type="video/mp4" />
-            </video>
-
-            <div className="relative z-10 w-full max-w-md p-6">
-                <div className="bg-black/30 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
-                    <div className="text-center mb-8">
-                        <TowerAnimation />
-                        <h1 className="text-5xl font-light text-white mb-2 tracking-tighter">Roomly</h1>
-                        <p className="text-white/70 font-light">Tu comunidad, conectada.</p>
-                    </div>
-                    
-                    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-                        <div className="space-y-1">
-                            <label className="text-xs font-bold text-white/80 uppercase tracking-wide ml-1">Email</label>
-                            <input 
-                                className="w-full p-4 bg-white/10 text-white placeholder-white/40 rounded-xl border border-white/10 focus:border-primary focus:ring-1 focus:ring-primary transition-all outline-none backdrop-blur-sm" 
-                                placeholder="tu@email.com" 
-                                value={email} 
-                                onChange={e => setEmail(e.target.value)} 
-                            />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-bold text-white/80 uppercase tracking-wide ml-1">Contraseña</label>
-                            <input 
-                                className="w-full p-4 bg-white/10 text-white placeholder-white/40 rounded-xl border border-white/10 focus:border-primary focus:ring-1 focus:ring-primary transition-all outline-none backdrop-blur-sm" 
-                                type="password" 
-                                placeholder="••••••••" 
-                                value={password} 
-                                onChange={e => setPassword(e.target.value)} 
-                            />
-                        </div>
-                        <button 
-                            disabled={loading} 
-                            className="bg-primary hover:bg-primary-dark text-white font-bold py-4 rounded-xl mt-4 transition-all shadow-lg shadow-primary/30 active:scale-[0.98] border border-white/10"
-                        >
-                            {loading ? 'Verificando...' : 'Entrar a mi Torre'}
-                        </button>
-                    </form>
-
-                    <div className="mt-8 pt-6 border-t border-white/10 grid grid-cols-2 gap-3">
-                         <button 
-                            onClick={onJoinCommunity}
-                            className="text-white font-bold text-xs bg-white/10 hover:bg-white/20 px-2 py-3 rounded-lg transition-colors flex flex-col items-center justify-center gap-1 text-center"
-                        >
-                            <span className="material-symbols-outlined text-xl">group_add</span>
-                            Asociarme a una<br/>comunidad
-                        </button>
-                        <button 
-                            onClick={onRegisterTower}
-                            className="text-white font-bold text-xs bg-white/10 hover:bg-white/20 px-2 py-3 rounded-lg transition-colors flex flex-col items-center justify-center gap-1 text-center"
-                        >
-                            <span className="material-symbols-outlined text-xl">add_location_alt</span>
-                            Registrar nueva<br/>Torre
-                        </button>
-                    </div>
+        <div className="login-container">
+            <div className="login-bg-orb login-bg-orb-1" />
+            <div className="login-bg-orb login-bg-orb-2" />
+            <div className="tower-animation">
+                {Array.from({ length: 18 }).map((_, i) => (
+                    <div key={i} className="tower-floor" style={{
+                        width: `${60 + Math.random() * 40}%`, margin: '0 auto',
+                        animationDelay: `${i * 0.15}s`
+                    }} />
+                ))}
+            </div>
+            <div className="login-card">
+                <div className="login-logo">
+                    <h1>Roomly</h1>
+                    <p>Tu comunidad, conectada</p>
+                </div>
+                {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>{error}</div>}
+                <form className="login-form" onSubmit={handleSubmit}>
+                    {isRegister && (
+                        <div><label>Nombre</label><input className="input" placeholder="Tu nombre" value={name} onChange={e => setName(e.target.value)} required /></div>
+                    )}
+                    <div><label>Correo electrónico</label><input className="input" type="email" placeholder="tu@email.com" value={email} onChange={e => setEmail(e.target.value)} required /></div>
+                    <div><label>Contraseña</label><input className="input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required /></div>
+                    <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
+                        {loading ? 'Cargando...' : isRegister ? 'Crear cuenta' : 'Iniciar sesión'}
+                    </button>
+                </form>
+                <button className="btn btn-ghost btn-full" style={{ marginTop: 8 }} onClick={() => setIsRegister(!isRegister)}>
+                    {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
+                </button>
+                <div className="login-divider">Demo rápido</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="btn btn-ghost btn-full btn-sm" onClick={() => demoLogin('USER')}>👤 Vecino</button>
+                    <button className="btn btn-ghost btn-full btn-sm" onClick={() => demoLogin('ADMIN')}>🔧 Admin</button>
                 </div>
             </div>
         </div>
     );
-};
+}
 
-const JoinCommunityPage = ({ onBack }: { onBack: () => void }) => {
-    const [step, setStep] = useState(1);
-    const [communities, setCommunities] = useState<Community[]>([]);
-    const [loading, setLoading] = useState(false);
-    
-    const [selectedCommunity, setSelectedCommunity] = useState<Community | null>(null);
-    const [selectedFloor, setSelectedFloor] = useState<number | null>(null);
-    const [selectedUnit, setSelectedUnit] = useState<string | null>(null);
-    const [userData, setUserData] = useState({ name: '', email: '' });
+// ─── HomePage ───
+function HomePage() {
+    const { user, go } = useApp();
+    const [reservations, setReservations] = useState<Reservation[]>([]);
+    const [amenities, setAmenities] = useState<Amenity[]>([]);
+    const level = getUserLevel(user?.points || 0);
 
     useEffect(() => {
-        loadCommunities();
-    }, []);
-
-    const loadCommunities = async () => {
-        setLoading(true);
-        const res = await api.getCommunities();
-        setLoading(false);
-        if (res.success && res.communities) setCommunities(res.communities);
-    };
-
-    const handleSendRequest = async () => {
-        if (!selectedCommunity || !selectedFloor || !selectedUnit || !userData.name || !userData.email) return;
-
-        setLoading(true);
-        const fullUnit = `${selectedFloor}${selectedUnit}`; // e.g. "4C" or "403" depending on logic
-        
-        const res = await api.requestJoin({
-            communityId: selectedCommunity.id,
-            communityName: selectedCommunity.name,
-            userEmail: userData.email,
-            userName: userData.name,
-            unit: fullUnit
-        });
-        
-        setLoading(false);
-        if (res.success) {
-            alert(`Se envió su solicitud a la comunidad "${selectedCommunity.name}", en breve el administrador gestionará la solicitud.`);
-            onBack();
-        } else {
-            alert("Error al enviar solicitud: " + res.error);
+        if (user) {
+            api.getUserReservations(user.id).then(r => setReservations(r.filter(x => x.status === 'ACTIVA').slice(0, 3)));
+            api.getAmenities(user.community_id).then(setAmenities);
         }
-    };
+    }, [user]);
 
     return (
-        <div className="relative min-h-screen w-full flex items-center justify-center overflow-hidden bg-bg-dark">
-            {/* Background reuse */}
-            <video autoPlay muted loop className="absolute inset-0 w-full h-full object-cover z-0 filter brightness-50">
-                <source src="https://videos.pexels.com/video-files/1739010/1739010-hd_1920_1080_30fps.mp4" type="video/mp4" />
-            </video>
-
-            <div className="relative z-10 w-full max-w-lg p-4 h-full md:h-auto">
-                <div className="bg-surface-dark/95 backdrop-blur-xl border border-white/20 rounded-3xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
-                    
-                    {/* Header */}
-                    <div className="flex items-center gap-3 mb-6 border-b border-white/10 pb-4">
-                        <button onClick={() => step === 1 ? onBack() : setStep(step - 1)} className="p-2 rounded-full hover:bg-white/10 text-white">
-                            <span className="material-symbols-outlined">arrow_back</span>
-                        </button>
-                        <div>
-                            <h2 className="text-xl font-bold text-white">Unirse a Comunidad</h2>
-                            <p className="text-xs text-white/60">Paso {step} de 3</p>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto pr-1">
-                        {step === 1 && (
-                            <div className="space-y-4 animate-fade-in">
-                                <p className="text-white font-medium">Selecciona tu comunidad:</p>
-                                {loading ? <div className="text-white/50 text-center py-4">Cargando comunidades...</div> : (
-                                    <div className="grid gap-3">
-                                        {communities.map(com => (
-                                            <button 
-                                                key={com.id}
-                                                onClick={() => { setSelectedCommunity(com); setStep(2); }}
-                                                className="flex items-center gap-4 p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all text-left group"
-                                            >
-                                                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold group-hover:scale-110 transition-transform">
-                                                    {com.name[0]}
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold text-white">{com.name}</h3>
-                                                    <p className="text-xs text-white/60">{com.address}</p>
-                                                </div>
-                                                <span className="material-symbols-outlined text-white/40 ml-auto">chevron_right</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                                {communities.length === 0 && !loading && (
-                                    <div className="text-center text-white/50 py-8">No hay comunidades activas.</div>
-                                )}
-                            </div>
-                        )}
-
-                        {step === 2 && selectedCommunity && (
-                            <div className="space-y-6 animate-fade-in">
-                                <div className="text-center">
-                                    <h3 className="text-lg font-bold text-white">{selectedCommunity.name}</h3>
-                                    <p className="text-sm text-white/60">Selecciona tu departamento</p>
-                                </div>
-
-                                {/* Apartment Selector Logic */}
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="text-xs font-bold text-white/80 uppercase mb-2 block">1. Selecciona Piso</label>
-                                        <div className="grid grid-cols-5 gap-2 max-h-32 overflow-y-auto no-scrollbar">
-                                            {[...Array(selectedCommunity.totalFloors || 20)].map((_, i) => {
-                                                const floor = i + 1;
-                                                return (
-                                                    <button
-                                                        key={floor}
-                                                        onClick={() => { setSelectedFloor(floor); setSelectedUnit(null); }}
-                                                        className={`py-2 rounded-lg text-sm font-bold border ${
-                                                            selectedFloor === floor 
-                                                            ? 'bg-primary border-primary text-white' 
-                                                            : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
-                                                        }`}
-                                                    >
-                                                        {floor}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-
-                                    {selectedFloor && (
-                                        <div className="animate-fade-in">
-                                            <label className="text-xs font-bold text-white/80 uppercase mb-2 block">2. Selecciona Unidad</label>
-                                            <div className="grid grid-cols-4 gap-2">
-                                                {['A', 'B', 'C', 'D', 'E', 'F'].slice(0, selectedCommunity.unitsPerFloor || 4).map(unit => (
-                                                     <button
-                                                        key={unit}
-                                                        onClick={() => setSelectedUnit(unit)}
-                                                        className={`py-3 rounded-lg text-sm font-bold border transition-all ${
-                                                            selectedUnit === unit
-                                                            ? 'bg-primary border-primary text-white shadow-lg shadow-primary/30' 
-                                                            : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
-                                                        }`}
-                                                    >
-                                                        {selectedFloor}{unit}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <button 
-                                    onClick={() => setStep(3)}
-                                    disabled={!selectedFloor || !selectedUnit}
-                                    className="w-full bg-white text-black font-bold py-3 rounded-xl mt-4 disabled:opacity-50"
-                                >
-                                    Confirmar Unidad: {selectedFloor}{selectedUnit}
-                                </button>
-                            </div>
-                        )}
-
-                        {step === 3 && (
-                            <div className="space-y-5 animate-fade-in">
-                                <div className="text-center">
-                                    <h3 className="text-lg font-bold text-white">Completa tus datos</h3>
-                                    <p className="text-sm text-white/60">Para que el administrador te identifique</p>
-                                </div>
-                                
-                                <div className="space-y-3">
-                                    <div>
-                                        <label className="text-xs font-bold text-white/80 uppercase ml-1">Nombre Completo</label>
-                                        <input 
-                                            value={userData.name}
-                                            onChange={e => setUserData({...userData, name: e.target.value})}
-                                            className="w-full p-3 bg-white/10 border border-white/10 rounded-xl text-white outline-none focus:border-primary"
-                                            placeholder="Ej. Juan Pérez"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-white/80 uppercase ml-1">Correo Electrónico</label>
-                                        <input 
-                                            value={userData.email}
-                                            onChange={e => setUserData({...userData, email: e.target.value})}
-                                            className="w-full p-3 bg-white/10 border border-white/10 rounded-xl text-white outline-none focus:border-primary"
-                                            placeholder="juan@ejemplo.com"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="bg-primary/20 p-4 rounded-xl border border-primary/50 text-center mt-2">
-                                    <p className="text-xs text-primary-light uppercase font-bold">Resumen de Solicitud</p>
-                                    <p className="text-white font-bold text-lg mt-1">{selectedCommunity?.name}</p>
-                                    <p className="text-white/80">Depto {selectedFloor}{selectedUnit}</p>
-                                </div>
-
-                                <button 
-                                    onClick={handleSendRequest}
-                                    disabled={loading || !userData.name || !userData.email}
-                                    className="w-full bg-primary hover:bg-primary-dark text-white font-bold py-4 rounded-xl shadow-lg shadow-primary/30 transition-all disabled:opacity-50"
-                                >
-                                    {loading ? 'Enviando...' : 'Enviar Solicitud'}
-                                </button>
-                            </div>
-                        )}
-                    </div>
+        <div className="fade-in">
+            <div style={{ marginBottom: 24 }}>
+                <p style={{ color: 'var(--text-2)', fontSize: 14 }}>Bienvenido de nuevo,</p>
+                <h2 style={{ fontSize: 26, fontWeight: 800 }}>{user?.name || 'Vecino'}</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                    <span className="badge badge-primary">{level.icon} {level.name}</span>
+                    <span className="badge badge-accent">{user?.points || 0} pts</span>
                 </div>
+            </div>
+
+            {/* Quick actions */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
+                <div className="card" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('amenities')}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--primary-light)' }}>add_circle</span>
+                    <h4 style={{ fontSize: 14, marginTop: 8 }}>Nueva Reserva</h4>
+                    <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Espacios comunes</p>
+                </div>
+                <div className="card" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('leaderboard')}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--accent)' }}>leaderboard</span>
+                    <h4 style={{ fontSize: 14, marginTop: 8 }}>Clasificación</h4>
+                    <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Top vecinos</p>
+                </div>
+            </div>
+
+            {/* Active reservations */}
+            <div className="section-title">
+                <span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>event</span>
+                Próximas Reservas
+            </div>
+            {reservations.length === 0 ? (
+                <div className="card" style={{ textAlign: 'center', padding: 24, color: 'var(--text-3)' }}>
+                    <p>No tienes reservas activas</p>
+                    <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => go('amenities')}>Reservar ahora</button>
+                </div>
+            ) : reservations.map(r => (
+                <div key={r.id} className="card" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }} onClick={() => go('my-reservations')}>
+                    <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--primary-glow)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>calendar_today</span>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                        <h4 style={{ fontSize: 14, fontWeight: 600 }}>{r.amenity?.name || 'Espacio'}</h4>
+                        <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.date} • {r.time_slot}</p>
+                    </div>
+                    <span className="badge badge-accent">Activa</span>
+                </div>
+            ))}
+
+            {/* Spaces preview */}
+            <div className="section-title" style={{ marginTop: 24 }}>
+                <span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>location_on</span>
+                Espacios Disponibles
+            </div>
+            <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
+                {amenities.slice(0, 4).map(a => (
+                    <div key={a.id} style={{ minWidth: 160, cursor: 'pointer' }} onClick={() => go('amenity-detail', a)}>
+                        <img src={a.image_url || 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=400'} alt={a.name}
+                            style={{ width: 160, height: 100, objectFit: 'cover', borderRadius: 12 }} />
+                        <h4 style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>{a.name}</h4>
+                        <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Cap: {a.capacity}</p>
+                    </div>
+                ))}
             </div>
         </div>
     );
-};
+}
 
-const NewTowerPage = ({ onBack, onComplete }: { onBack: () => void, onComplete: () => void }) => {
-    const [step, setStep] = useState(1);
-    const [formData, setFormData] = useState({ name: '', address: '', adminEmail: '' });
-    
-    // Mock Map Interaction
-    const handleMapClick = (e: React.MouseEvent) => {
-        // Visual feedback simulated
-        alert("Ubicación fijada en el mapa (Simulación)");
-    };
-
-    const handleCreate = async () => {
-        // Call API
-        await api.createTower({ ...formData, lat: -33.4, lng: -70.6 }); // Mock coords
-        alert("¡Torre creada! Ahora eres el administrador.");
-        onComplete();
-    };
-
-    return (
-        <div className="min-h-screen bg-bg-light dark:bg-bg-dark flex flex-col">
-            {/* Header */}
-            <div className="p-4 bg-white dark:bg-surface-dark border-b border-gray-200 dark:border-white/5 flex items-center gap-4 sticky top-0 z-50">
-                <button onClick={onBack} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-white/10">
-                    <span className="material-symbols-outlined text-slate-800 dark:text-white">arrow_back</span>
-                </button>
-                <h1 className="text-lg font-bold text-slate-800 dark:text-white">Nueva Comunidad</h1>
-            </div>
-
-            <div className="flex-1 p-6 max-w-lg mx-auto w-full">
-                {step === 1 && (
-                    <div className="space-y-6 animate-fade-in">
-                        <div className="text-center mb-8">
-                            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center text-primary mx-auto mb-4">
-                                <span className="material-symbols-outlined text-3xl">domain_add</span>
-                            </div>
-                            <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Registra tu Edificio</h2>
-                            <p className="text-slate-500">Comienza a gestionar tus áreas comunes hoy.</p>
-                        </div>
-
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Nombre de la Torre / Condominio</label>
-                                <input 
-                                    className="w-full p-4 rounded-xl bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10"
-                                    placeholder="Ej. Edificio Los Andes"
-                                    value={formData.name}
-                                    onChange={e => setFormData({...formData, name: e.target.value})}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Tu Email de Administrador</label>
-                                <input 
-                                    className="w-full p-4 rounded-xl bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-white/10"
-                                    placeholder="admin@ejemplo.com"
-                                    value={formData.adminEmail}
-                                    onChange={e => setFormData({...formData, adminEmail: e.target.value})}
-                                />
-                            </div>
-                        </div>
-
-                        <button 
-                            onClick={() => setStep(2)}
-                            disabled={!formData.name || !formData.adminEmail}
-                            className="w-full bg-primary text-white font-bold py-4 rounded-xl mt-6 disabled:opacity-50"
-                        >
-                            Siguiente: Ubicación
-                        </button>
-                    </div>
-                )}
-
-                {step === 2 && (
-                    <div className="flex flex-col h-full animate-fade-in">
-                        <div className="mb-4">
-                            <h2 className="text-xl font-bold text-slate-800 dark:text-white">Confirma la Ubicación</h2>
-                            <p className="text-sm text-slate-500">Arrastra el pin a la entrada principal.</p>
-                        </div>
-
-                        {/* Visual Mock Map */}
-                        <div 
-                            className="flex-1 bg-gray-200 rounded-2xl relative overflow-hidden border-2 border-primary cursor-crosshair shadow-inner"
-                            onClick={handleMapClick}
-                        >
-                            {/* Static map background image */}
-                            <img 
-                                src="https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=800&auto=format&fit=crop" 
-                                className="w-full h-full object-cover opacity-50 grayscale hover:grayscale-0 transition-all duration-500" 
-                                alt="Map Background"
-                            />
-                            
-                            {/* Draggable Pin Mock */}
-                            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-primary animate-bounce">
-                                <span className="material-symbols-outlined text-5xl filled drop-shadow-lg">location_on</span>
-                            </div>
-                            
-                            <div className="absolute bottom-4 left-4 right-4 bg-white/90 dark:bg-black/80 backdrop-blur p-3 rounded-xl text-xs text-center border border-gray-200 dark:border-white/10">
-                                <span className="font-bold">Ubicación detectada:</span> Av. Providencia 1234, Santiago
-                            </div>
-                        </div>
-
-                        <button 
-                            onClick={handleCreate}
-                            className="w-full bg-primary text-white font-bold py-4 rounded-xl mt-6 shadow-lg shadow-primary/20"
-                        >
-                            Crear Comunidad
-                        </button>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-// ... HomePage, CommunityPage, etc. remain the same ...
-// Keep existing components (HomePage, CommunityPage, LeaderboardPage, AmenitiesPage, AmenityDetailPage)
-// Just ensure the App component routing is updated.
-
-const HomePage = ({ user, navigate }: { user: User, navigate: (p: string) => void }) => {
-    // ... same code as before ...
-    return (
-        <div className="animate-fade-in space-y-8 pb-20">
-            {/* Tower Header Card */}
-            <div className="relative overflow-hidden rounded-3xl bg-surface-light dark:bg-surface-dark border border-gray-100 dark:border-white/5 shadow-xl">
-                <div className="absolute top-0 right-0 p-8 opacity-10 text-primary">
-                    <span className="material-symbols-outlined text-9xl">apartment</span>
-                </div>
-                
-                <div className="relative z-10 p-8">
-                    <div className="flex items-center gap-4 mb-6">
-                        <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-white/10 p-1">
-                            <img 
-                                src={user.avatar || `https://ui-avatars.com/api/?name=${user.name}&background=7c3aed&color=fff`} 
-                                className="w-full h-full rounded-full object-cover"
-                            />
-                        </div>
-                        <div>
-                            <h2 className="text-2xl font-bold text-slate-800 dark:text-white">{user.name}</h2>
-                            <p className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                                <span className="material-symbols-outlined text-sm">location_city</span>
-                                {user.tower} • Depto {user.apartment}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="bg-gray-50 dark:bg-black/20 rounded-xl p-4 flex justify-between items-center border border-gray-100 dark:border-white/5">
-                        <div>
-                            <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Estatus en Comunidad</p>
-                            <p className="text-primary font-bold text-lg">{user.level}</p>
-                        </div>
-                        <div className="text-right">
-                             <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Puntos de Aporte</p>
-                             <p className="text-slate-800 dark:text-white font-bold text-lg">{user.points} pts</p>
-                        </div>
-                    </div>
-                </div>
-                
-                {/* Decorative bottom bar */}
-                <div className="h-2 w-full bg-gradient-to-r from-primary to-primary-light"></div>
-            </div>
-
-            {/* Actions Grid */}
-            <div>
-                <h3 className="text-lg font-bold text-slate-800 dark:text-white mb-4 px-2">Gestión Rápida</h3>
-                <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => navigate('amenities')} className="bg-surface-light dark:bg-surface-dark p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-white/5 hover:border-primary/50 transition-all group text-left">
-                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-3 group-hover:scale-110 transition-transform">
-                             <span className="material-symbols-outlined">calendar_add_on</span>
-                        </div>
-                        <p className="font-bold text-slate-800 dark:text-white">Reservar Espacio</p>
-                        <p className="text-xs text-slate-500 mt-1">Gym, Piscina, Quincho</p>
-                    </button>
-
-                    <button onClick={() => navigate('community')} className="bg-surface-light dark:bg-surface-dark p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-white/5 hover:border-primary/50 transition-all group text-left">
-                        <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 mb-3 group-hover:scale-110 transition-transform">
-                             <span className="material-symbols-outlined">add_a_photo</span>
-                        </div>
-                        <p className="font-bold text-slate-800 dark:text-white">Muro General</p>
-                        <p className="text-xs text-slate-500 mt-1">Noticias de la torre</p>
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-const CommunityPage = ({ user }: { user: User }) => {
-    // ... same code ...
-    const [posts, setPosts] = useState<Post[]>([]);
+// ─── AmenitiesPage ───
+function AmenitiesPage() {
+    const { user, go } = useApp();
+    const [amenities, setAmenities] = useState<Amenity[]>([]);
     const [loading, setLoading] = useState(true);
-    const [newPostText, setNewPostText] = useState('');
 
-    const loadPosts = useCallback(async () => {
-        setLoading(true);
-        const res = await api.getPosts(user.tower);
-        setLoading(false);
-        if (res.success && res.posts) setPosts(res.posts);
-    }, [user.tower]);
-
-    useEffect(() => { loadPosts(); }, [loadPosts]);
-
-    const handlePost = async () => {
-        if(!newPostText) return;
-        const res = await api.createPost(user.email, newPostText, null); 
-        if(res.success) {
-            setNewPostText('');
-            loadPosts();
-        }
-    };
+    useEffect(() => {
+        api.getAmenities(user?.community_id).then(a => { setAmenities(a); setLoading(false); });
+    }, [user]);
 
     return (
-        <div className="pb-20 flex flex-col h-[calc(100vh-100px)]">
-             <div className="mb-4">
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Comunidad {user.tower}</h2>
-                <p className="text-sm text-slate-500">Espacio para anuncios y convivencia</p>
-            </div>
-
-            <div className="bg-surface-light dark:bg-surface-dark p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-white/5 mb-6">
-                <textarea 
-                    value={newPostText}
-                    onChange={e => setNewPostText(e.target.value)}
-                    className="w-full bg-transparent border-none resize-none focus:ring-0 text-slate-800 dark:text-white placeholder-slate-400"
-                    placeholder={`¿Qué quieres compartir con tus vecinos, ${user.name}?`}
-                    rows={2}
-                />
-                <div className="flex justify-between items-center mt-2 border-t border-gray-100 dark:border-white/5 pt-2">
-                    <button className="text-slate-400 hover:text-primary transition-colors">
-                        <span className="material-symbols-outlined">image</span>
-                    </button>
-                    <button 
-                        onClick={handlePost}
-                        className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-dark transition-colors"
-                    >
-                        Publicar
-                    </button>
-                </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-                {loading ? <div className="text-center text-slate-400 mt-10">Cargando actividad...</div> : posts.map(post => (
-                    <div key={post.id} className="bg-surface-light dark:bg-surface-dark p-4 rounded-2xl border border-gray-100 dark:border-white/5 shadow-sm">
-                        <div className="flex items-center gap-3 mb-3">
-                            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-white/10 flex items-center justify-center text-xs font-bold text-slate-600 dark:text-white">
-                                {post.userName?.[0]}
-                            </div>
-                            <div>
-                                <p className="text-sm font-bold text-slate-800 dark:text-white">{post.userName}</p>
-                                <p className="text-[10px] text-slate-400">{post.timestamp}</p>
+        <div className="fade-in">
+            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>search</span> Espacios Comunes</h2>
+            {loading ? Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 240, marginBottom: 16 }} />) :
+                amenities.map(a => (
+                    <div key={a.id} className="amenity-card" onClick={() => go('amenity-detail', a)}>
+                        <img className="amenity-card-img" src={a.image_url || 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800'} alt={a.name} />
+                        <div className="amenity-card-body">
+                            <h3>{a.name}</h3>
+                            <p>{a.description}</p>
+                            <div className="amenity-card-meta">
+                                <span><span className="material-symbols-outlined" style={{ fontSize: 16 }}>group</span> {a.capacity} personas</span>
+                                <span><span className="material-symbols-outlined" style={{ fontSize: 16 }}>stars</span> +{a.points_reward} pts</span>
                             </div>
                         </div>
-                        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-3">{post.text}</p>
-                        {post.image && (
-                            <div className="rounded-xl overflow-hidden mb-3">
-                                <img src={post.image} className="w-full h-48 object-cover" />
-                            </div>
-                        )}
-                        <div className="flex gap-4 text-slate-400 text-xs">
-                             <button className="flex items-center gap-1 hover:text-primary transition-colors">
-                                <span className="material-symbols-outlined text-base">thumb_up</span> Me gusta
-                             </button>
-                        </div>
+                    </div>
+                ))
+            }
+        </div>
+    );
+}
+
+// ─── AmenityDetailPage ───
+function AmenityDetailPage() {
+    const { viewData: amenity, go } = useApp();
+    if (!amenity) return <div className="empty-state"><p>Selecciona un espacio</p></div>;
+    return (
+        <div className="fade-in">
+            <button className="btn btn-ghost btn-sm" onClick={() => go('amenities')} style={{ marginBottom: 12 }}>
+                <span className="material-symbols-outlined">arrow_back</span> Volver
+            </button>
+            <img src={amenity.image_url || ''} alt={amenity.name} style={{ width: '100%', height: 220, objectFit: 'cover', borderRadius: 16, marginBottom: 16 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span className="badge badge-accent">Disponible</span>
+            </div>
+            <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 8 }}>{amenity.name}</h2>
+            <p style={{ color: 'var(--text-2)', fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>{amenity.description}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 20 }}>
+                {[{ icon: 'group', label: 'Capacidad', value: `${amenity.capacity} Pax` },
+                { icon: 'stars', label: 'Puntos', value: `+${amenity.points_reward}` },
+                { icon: 'category', label: 'Tipo', value: amenity.amenity_type }
+                ].map(s => (
+                    <div key={s.label} className="card" style={{ textAlign: 'center', padding: 12 }}>
+                        <span className="material-symbols-outlined" style={{ color: 'var(--primary-light)', fontSize: 24 }}>{s.icon}</span>
+                        <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>{s.label}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{s.value}</div>
                     </div>
                 ))}
             </div>
-        </div>
-    );
-};
-const LeaderboardPage = ({ user }: { user: User }) => {
-    // ... same code ...
-    return (
-        <div className="pb-20 animate-fade-in">
-            <div className="text-center mb-8">
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Vecinos Colaboradores</h2>
-                <p className="text-slate-500 text-sm mt-1">Reconocimiento por reportes útiles y buena convivencia</p>
-            </div>
-
-            <div className="bg-surface-light dark:bg-surface-dark rounded-3xl shadow-sm border border-gray-100 dark:border-white/5 overflow-hidden">
-                <div className="p-4 bg-gray-50 dark:bg-white/5 border-b border-gray-100 dark:border-white/5 flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    <span>Posición</span>
-                    <span>Puntos</span>
-                </div>
-                {MOCK_LEADERBOARD.map((u, index) => (
-                    <div key={index} className="flex items-center gap-4 p-4 border-b border-gray-100 dark:border-white/5 last:border-0 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
-                        <div className={`w-8 h-8 flex items-center justify-center rounded-full font-bold text-sm
-                            ${index === 0 ? 'bg-yellow-100 text-yellow-700' : 
-                              index === 1 ? 'bg-gray-100 text-gray-700' : 
-                              index === 2 ? 'bg-orange-100 text-orange-700' : 'text-slate-500'}`}>
-                            {index + 1}
-                        </div>
-                        <img src={u.avatar} className="w-10 h-10 rounded-full object-cover" />
-                        <div className="flex-1">
-                            <h3 className="text-sm font-bold text-slate-800 dark:text-white">{u.name}</h3>
-                            <p className="text-xs text-slate-500">{u.level}</p>
-                        </div>
-                        <div className="text-primary font-bold text-sm">
-                            {u.points}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-};
-const AmenityDetailPage = ({ amenity, user, navigate, onBack }: { amenity: Amenity | null, user: User, navigate: (p: string) => void, onBack: () => void }) => {
-    // ... same code ...
-    const [view, setView] = useState<'info' | 'book'>('info');
-
-    if (!amenity) return null;
-
-    return (
-        <div className="bg-bg-light dark:bg-bg-dark min-h-screen flex flex-col pb-24">
-            <div className="relative h-64 w-full">
-                <div className="absolute top-4 left-4 z-20">
-                    <button onClick={onBack} className="bg-black/40 backdrop-blur text-white p-2 rounded-full hover:bg-black/60 transition-colors">
-                         <span className="material-symbols-outlined">arrow_back</span>
-                    </button>
-                </div>
-                <img src={amenity.image} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-bg-light dark:from-bg-dark via-transparent to-black/30"></div>
-                <div className="absolute bottom-6 left-6 right-6">
-                    <h1 className="text-3xl font-bold text-slate-800 dark:text-white mb-1 drop-shadow-sm">{amenity.name}</h1>
-                    <div className="flex items-center gap-2">
-                        <div className="flex text-yellow-400 text-sm">
-                            <span className="material-symbols-outlined filled text-lg">star</span>
-                            <span className="material-symbols-outlined filled text-lg">star</span>
-                            <span className="material-symbols-outlined filled text-lg">star</span>
-                            <span className="material-symbols-outlined filled text-lg">star</span>
-                            <span className="material-symbols-outlined text-lg">star_half</span>
-                        </div>
-                        <span className="text-white/90 text-sm font-medium">4.5 (12 opiniones)</span>
-                    </div>
-                </div>
-            </div>
-
-            <div className="flex border-b border-gray-200 dark:border-white/10 px-6 sticky top-0 bg-bg-light dark:bg-bg-dark z-10 pt-2">
-                <button 
-                    onClick={() => setView('info')}
-                    className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${view === 'info' ? 'border-primary text-primary' : 'border-transparent text-slate-500'}`}
-                >
-                    Información y Opiniones
-                </button>
-                <button 
-                    onClick={() => setView('book')}
-                    className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${view === 'book' ? 'border-primary text-primary' : 'border-transparent text-slate-500'}`}
-                >
-                    Reservar
-                </button>
-            </div>
-
-            <div className="p-6 flex-1 overflow-y-auto">
-                {view === 'info' ? (
-                    <div className="space-y-8 animate-fade-in">
-                        <div>
-                            <h3 className="font-bold text-slate-800 dark:text-white mb-2">Sobre este espacio</h3>
-                            <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-sm">
-                                {amenity.description}
-                                <br/><br/>
-                                <span className="font-semibold text-primary">Capacidad:</span> {amenity.capacity} personas.<br/>
-                                <span className="font-semibold text-primary">Recompensa:</span> +{amenity.pointsReward} pts por uso correcto.
-                            </p>
-                        </div>
-
-                        <div>
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="font-bold text-slate-800 dark:text-white">Fotos y Opiniones</h3>
-                                <button className="text-primary text-xs font-bold hover:underline">Escribir opinión</button>
-                            </div>
-                            
-                            <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar">
-                                <img src={amenity.image} className="w-32 h-32 rounded-lg object-cover flex-shrink-0" />
-                                <img src="https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?q=80&w=200" className="w-32 h-32 rounded-lg object-cover flex-shrink-0" />
-                                <div className="w-32 h-32 rounded-lg bg-gray-100 dark:bg-white/5 flex flex-col items-center justify-center flex-shrink-0 text-slate-400 border border-gray-200 dark:border-white/10">
-                                    <span className="material-symbols-outlined mb-1">add_a_photo</span>
-                                    <span className="text-xs">Agregar</span>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4 mt-2">
-                                {MOCK_REVIEWS.map(review => (
-                                    <div key={review.id} className="border-b border-gray-100 dark:border-white/5 pb-4 last:border-0">
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center text-xs font-bold">
-                                                {review.avatar}
-                                            </div>
-                                            <div>
-                                                <p className="text-xs font-bold text-slate-800 dark:text-white">{review.user}</p>
-                                                <div className="flex text-yellow-400 text-[10px]">
-                                                    {[...Array(5)].map((_, i) => (
-                                                        <span key={i} className={`material-symbols-outlined filled text-xs ${i < review.rating ? '' : 'text-gray-300'}`}>star</span>
-                                                    ))}
-                                                    <span className="text-slate-400 ml-2">{review.date}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <p className="text-xs text-slate-600 dark:text-slate-300">{review.text}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    <BookingFlowInner amenity={amenity} user={user} navigate={navigate} />
-                )}
-            </div>
-        </div>
-    );
-};
-const BookingFlowInner = ({ amenity, user, navigate }: { amenity: Amenity, user: User, navigate: (p: string) => void }) => {
-    // ... same code ...
-    const [date, setDate] = useState('');
-    const [slots, setSlots] = useState<string[]>([]);
-    const [loading, setLoading] = useState(false);
-
-    const handleBook = async () => {
-        if (!date || slots.length === 0) return alert("Selecciona fecha y hora");
-        setLoading(true);
-        const res = await api.book({ room: amenity.name, date, slots, user: user.email });
-        setLoading(false);
-        if (res.success) {
-            alert("Reserva confirmada exitosamente.");
-            navigate('home');
-        } else {
-            alert(res.error);
-        }
-    };
-
-    const toggleSlot = (s: string) => {
-        if (slots.includes(s)) setSlots(slots.filter(x => x !== s));
-        else setSlots([...slots, s]);
-    };
-
-    return (
-        <div className="space-y-6 animate-fade-in">
-            <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-3">Fecha de Reserva</label>
-                <input 
-                    type="date" 
-                    onChange={e => { setDate(e.target.value); setSlots([]); }} 
-                    className="w-full p-4 rounded-xl bg-surface-light dark:bg-surface-dark text-slate-800 dark:text-white border border-gray-200 dark:border-white/10 focus:border-primary focus:ring-1 outline-none" 
-                />
-            </div>
-
-            <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide block mb-3">Bloques Disponibles</label>
-                <div className="grid grid-cols-3 gap-3">
-                    {['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00'].map(time => {
-                            const isSelected = slots.includes(time);
-                            return (
-                            <button
-                                key={time}
-                                onClick={() => toggleSlot(time)}
-                                className={`py-3 rounded-lg text-sm font-medium transition-all ${
-                                    isSelected 
-                                    ? 'bg-primary text-white shadow-md shadow-primary/30' 
-                                    : 'bg-white dark:bg-surface-dark text-slate-600 dark:text-slate-300 border border-gray-200 dark:border-white/10 hover:border-primary/50'
-                                }`}
-                            >
-                                {time}
-                            </button>
-                            );
-                    })}
-                </div>
-            </div>
-
-            <button 
-                onClick={handleBook} 
-                disabled={loading || slots.length === 0 || !date}
-                className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition-all mt-4 ${
-                    loading || slots.length === 0 || !date 
-                    ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed' 
-                    : 'bg-primary hover:bg-primary-dark text-white'
-                }`}
-            >
-                {loading ? 'Procesando...' : 'Confirmar Reserva'}
+            <button className="btn btn-primary btn-full" onClick={() => go('booking', amenity)}>
+                <span className="material-symbols-outlined">event_available</span> Reservar Ahora
             </button>
         </div>
     );
-};
-const AmenitiesPage = ({ navigate, setTargetAmenity }: { navigate: (p: string) => void, setTargetAmenity: (a: Amenity) => void }) => {
-    // ... same code ...
-    return (
-        <div className="pb-24 animate-fade-in">
-            <div className="mb-6">
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Espacios Comunes</h2>
-                <p className="text-slate-500 text-sm">Reserva tu espacio en {AMENITIES.length} áreas disponibles</p>
-            </div>
-            
-            <div className="grid gap-6 md:grid-cols-2">
-                {AMENITIES.map(amenity => (
-                    <div 
-                        key={amenity.id} 
-                        onClick={() => { setTargetAmenity(amenity); navigate('amenity_detail'); }}
-                        className="group bg-surface-light dark:bg-surface-dark rounded-2xl overflow-hidden shadow-sm border border-gray-100 dark:border-white/5 hover:shadow-md transition-all duration-300 cursor-pointer"
-                    >
-                        <div className="h-48 relative overflow-hidden">
-                            <img src={amenity.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" alt={amenity.name} />
-                            <div className="absolute top-3 right-3 bg-white/90 dark:bg-black/80 backdrop-blur px-3 py-1 rounded-full text-xs font-bold text-slate-800 dark:text-white shadow-sm">
-                                Capacidad: {amenity.capacity}
-                            </div>
-                        </div>
+}
 
-                        <div className="p-5">
-                            <div className="flex justify-between items-start mb-2">
-                                <h3 className="text-lg font-bold text-slate-800 dark:text-white">{amenity.name}</h3>
-                                <div className="flex items-center gap-1 text-xs text-slate-500">
-                                    <span className="material-symbols-outlined text-sm text-yellow-500 filled">star</span>
-                                    4.5 (12)
-                                </div>
-                            </div>
-                            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4 line-clamp-2">{amenity.description}</p>
-                            <span className="text-primary text-sm font-bold hover:underline">Ver detalles y reservar &rarr;</span>
+// ─── BookingPage ───
+function BookingPage() {
+    const { viewData: amenity, user, go, toast } = useApp();
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [slot, setSlot] = useState('');
+    const [booked, setBooked] = useState<string[]>([]);
+    const [loading, setLoading] = useState(false);
+    const slots = ['08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00', '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00', '19:00-20:00'];
+
+    useEffect(() => {
+        if (amenity) api.getAmenityReservations(amenity.id, date).then(r => setBooked(r.map(x => x.time_slot)));
+    }, [amenity, date]);
+
+    const handleBook = async () => {
+        if (!slot || !user || !amenity) return;
+        setLoading(true);
+        try {
+            await api.createReservation({ user_id: user.id, amenity_id: amenity.id, date, time_slot: slot });
+            if (user.community_id) await api.awardPoints(user.id, user.community_id, 'RESERVATION_COMPLETED', amenity.points_reward || 10, `Reserva en ${amenity.name}`);
+            toast('✅ Reserva confirmada');
+            go('my-reservations');
+        } catch (e: any) { toast('❌ ' + (e.message || 'Error')); }
+        setLoading(false);
+    };
+
+    if (!amenity) return <div className="empty-state"><p>Selecciona un espacio primero</p></div>;
+    return (
+        <div className="fade-in">
+            <button className="btn btn-ghost btn-sm" onClick={() => go('amenity-detail', amenity)} style={{ marginBottom: 12 }}>
+                <span className="material-symbols-outlined">arrow_back</span> Volver
+            </button>
+            <h2 className="section-title">Reservar {amenity.name}</h2>
+            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Fecha</label>
+            <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} style={{ marginBottom: 16 }} />
+            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Horario</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
+                {slots.map(s => (
+                    <div key={s} className={`time-slot ${slot === s ? 'selected' : ''} ${booked.includes(s) ? 'disabled' : ''}`}
+                        onClick={() => !booked.includes(s) && setSlot(s)}>{s} {booked.includes(s) && '🔒'}</div>
+                ))}
+            </div>
+            {slot && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                    <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Resumen</h4>
+                    <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📍 {amenity.name}</p>
+                    <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📅 {date}</p>
+                    <p style={{ fontSize: 13, color: 'var(--text-2)' }}>🕐 {slot}</p>
+                    <p style={{ fontSize: 13, color: 'var(--accent)', marginTop: 4 }}>+{amenity.points_reward || 10} puntos</p>
+                </div>
+            )}
+            <button className="btn btn-primary btn-full" disabled={!slot || loading} onClick={handleBook}>
+                {loading ? 'Reservando...' : 'Confirmar Reserva'}
+            </button>
+        </div>
+    );
+}
+
+// ─── MyReservationsPage ───
+function MyReservationsPage() {
+    const { user, toast } = useApp();
+    const [reservations, setReservations] = useState<Reservation[]>([]);
+    const [tab, setTab] = useState<'active' | 'past'>('active');
+
+    useEffect(() => { if (user) api.getUserReservations(user.id).then(setReservations); }, [user]);
+
+    const cancel = async (id: string) => {
+        try { await api.cancelReservation(id); setReservations(r => r.map(x => x.id === id ? { ...x, status: 'CANCELADA' } : x)); toast('Reserva cancelada'); } catch { toast('Error'); }
+    };
+
+    const filtered = reservations.filter(r => tab === 'active' ? r.status === 'ACTIVA' : r.status !== 'ACTIVA');
+    return (
+        <div className="fade-in">
+            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>calendar_month</span> Mis Reservas</h2>
+            <div className="tabs">
+                <button className={`tab ${tab === 'active' ? 'active' : ''}`} onClick={() => setTab('active')}>Próximas</button>
+                <button className={`tab ${tab === 'past' ? 'active' : ''}`} onClick={() => setTab('past')}>Pasadas</button>
+            </div>
+            {filtered.length === 0 ? <div className="empty-state"><span className="material-symbols-outlined">event_busy</span><p>No hay reservas</p></div> :
+                filtered.map(r => (
+                    <div key={r.id} className="card" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <img src={r.amenity?.image_url || ''} alt="" style={{ width: 60, height: 60, borderRadius: 10, objectFit: 'cover' }} />
+                        <div style={{ flex: 1 }}>
+                            <h4 style={{ fontSize: 14, fontWeight: 600 }}>{r.amenity?.name}</h4>
+                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.date} • {r.time_slot}</p>
+                        </div>
+                        {r.status === 'ACTIVA' ? (
+                            <button className="btn btn-danger btn-sm" onClick={() => cancel(r.id)}>Cancelar</button>
+                        ) : (
+                            <span className={`badge ${r.status === 'CANCELADA' ? 'badge-danger' : r.grade === 'CUMPLIDA' ? 'badge-accent' : 'badge-warning'}`}>
+                                {r.status === 'CANCELADA' ? 'Cancelada' : r.grade}
+                            </span>
+                        )}
+                    </div>
+                ))
+            }
+        </div>
+    );
+}
+
+// ─── CommunityPage ───
+function CommunityPage() {
+    const { user, toast, go } = useApp();
+    const [posts, setPosts] = useState<Post[]>([]);
+    const [text, setText] = useState('');
+    const [likedIds, setLikedIds] = useState<string[]>([]);
+    const [showComments, setShowComments] = useState<string | null>(null);
+    const [commentText, setCommentText] = useState('');
+
+    useEffect(() => {
+        if (user?.community_id) {
+            api.getCommunityPosts(user.community_id).then(setPosts);
+            api.getUserLikes(user.id).then(setLikedIds);
+        }
+    }, [user]);
+
+    if (!user?.community_id) return (
+        <div className="empty-state fade-in">
+            <span className="material-symbols-outlined">groups</span>
+            <h3>No perteneces a una comunidad</h3>
+            <p style={{ margin: '8px 0' }}>Únete a una torre o crea tu comunidad</p>
+            <button className="btn btn-primary" onClick={() => go('join-community')}>Unirme a una torre</button>
+        </div>
+    );
+
+    const createPost = async (type: 'GENERAL' | 'BUG_REPORT' = 'GENERAL') => {
+        if (!text.trim()) return;
+        try {
+            const post = await api.createPost({ user_id: user.id, community_id: user.community_id, text, post_type: type });
+            setPosts([post, ...posts]);
+            const pts = type === 'BUG_REPORT' ? 25 : 5;
+            await api.awardPoints(user.id, user.community_id!, type === 'BUG_REPORT' ? 'BUG_REPORT' : 'COMMENT', pts);
+            setText('');
+            toast(`+${pts} puntos`);
+        } catch { toast('Error al publicar'); }
+    };
+
+    const toggleLike = async (postId: string) => {
+        const liked = likedIds.includes(postId);
+        try {
+            if (liked) { await api.unlikePost(postId, user.id); setLikedIds(l => l.filter(x => x !== postId)); }
+            else { await api.likePost(postId, user.id); setLikedIds([...likedIds, postId]); }
+            setPosts(p => p.map(x => x.id === postId ? { ...x, likes_count: x.likes_count + (liked ? -1 : 1) } : x));
+        } catch { }
+    };
+
+    const addComment = async (postId: string) => {
+        if (!commentText.trim()) return;
+        try {
+            const c = await api.addComment({ post_id: postId, user_id: user.id, text: commentText });
+            setPosts(p => p.map(x => x.id === postId ? { ...x, comments: [...(x.comments || []), c] } : x));
+            await api.awardPoints(user.id, user.community_id!, 'COMMENT', 5);
+            setCommentText('');
+            toast('+5 puntos');
+        } catch { }
+    };
+
+    const timeAgo = (d: string) => {
+        const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+        if (m < 60) return `${m}m`;
+        if (m < 1440) return `${Math.floor(m / 60)}h`;
+        return `${Math.floor(m / 1440)}d`;
+    };
+
+    return (
+        <div className="fade-in">
+            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>groups</span> Comunidad</h2>
+            <div className="card" style={{ marginBottom: 16 }}>
+                <textarea className="input" placeholder="¿Qué hay de nuevo en la torre?" value={text} onChange={e => setText(e.target.value)} rows={2} />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => createPost()}>Publicar</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => createPost('BUG_REPORT')}>🐛 Reportar Bug</button>
+                </div>
+            </div>
+            {posts.map(p => (
+                <div key={p.id} className="post-card">
+                    <div className="post-header">
+                        <div className="avatar">{p.user?.avatar_url ? <img src={p.user.avatar_url} alt="" /> : (p.user?.name?.[0] || '?')}</div>
+                        <div className="post-header-info">
+                            <h4>{p.user?.name || 'Vecino'}</h4>
+                            <span>{timeAgo(p.created_at)} {p.post_type === 'BUG_REPORT' && '• 🐛 Bug Report'}</span>
                         </div>
                     </div>
-                ))}
+                    <p className="post-text">{p.text}</p>
+                    {p.image_url && <img className="post-image" src={p.image_url} alt="" />}
+                    <div className="post-actions">
+                        <button className={`post-action-btn ${likedIds.includes(p.id) ? 'liked' : ''}`} onClick={() => toggleLike(p.id)}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{likedIds.includes(p.id) ? 'favorite' : 'favorite_border'}</span> {p.likes_count}
+                        </button>
+                        <button className="post-action-btn" onClick={() => setShowComments(showComments === p.id ? null : p.id)}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chat_bubble_outline</span> {p.comments?.length || 0}
+                        </button>
+                    </div>
+                    {showComments === p.id && (
+                        <div style={{ marginTop: 12, paddingTop: 8, borderTop: '1px solid var(--border-2)' }}>
+                            {(p.comments || []).map(c => (
+                                <div key={c.id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                                    <div className="avatar" style={{ width: 28, height: 28, fontSize: 12 }}>{c.user?.name?.[0] || '?'}</div>
+                                    <div><span style={{ fontSize: 12, fontWeight: 600 }}>{c.user?.name}</span><p style={{ fontSize: 13, color: 'var(--text-2)' }}>{c.text}</p></div>
+                                </div>
+                            ))}
+                            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                <input className="input" placeholder="Comentar..." value={commentText} onChange={e => setCommentText(e.target.value)} style={{ fontSize: 13 }} />
+                                <button className="btn btn-primary btn-sm" onClick={() => addComment(p.id)}>Enviar</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+}
+
+// ─── LeaderboardPage ───
+function LeaderboardPage() {
+    const { user } = useApp();
+    const [tab, setTab] = useState<'towers' | 'users'>('towers');
+    const [communities, setCommunities] = useState<Community[]>([]);
+    const [users, setUsers] = useState<User[]>([]);
+
+    useEffect(() => {
+        api.getCommunityLeaderboard().then(setCommunities);
+        if (user?.community_id) api.getCommunityUsers(user.community_id).then(setUsers);
+    }, [user]);
+
+    const maxPts = tab === 'towers' ? Math.max(...communities.map(c => c.total_points), 1) : Math.max(...users.map(u => u.points), 1);
+    return (
+        <div className="fade-in">
+            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>leaderboard</span> Clasificación</h2>
+            <div className="leaderboard-tabs">
+                <button className={`leaderboard-tab ${tab === 'towers' ? 'active' : ''}`} onClick={() => setTab('towers')}>🏢 Torres</button>
+                <button className={`leaderboard-tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>👥 Mi Torre</button>
+            </div>
+            {tab === 'towers' ? communities.map((c, i) => (
+                <div key={c.id} className="leaderboard-item">
+                    <div className={`leaderboard-rank ${i < 3 ? `top-${i + 1}` : ''}`}>{i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</div>
+                    <div className="leaderboard-info">
+                        <h4>{c.name}</h4>
+                        <div className="leaderboard-bar"><div className="leaderboard-bar-fill" style={{ width: `${(c.total_points / maxPts) * 100}%` }} /></div>
+                    </div>
+                    <div className="leaderboard-points">{c.total_points}</div>
+                </div>
+            )) : users.map((u, i) => (
+                <div key={u.id} className="leaderboard-item">
+                    <div className={`leaderboard-rank ${i < 3 ? `top-${i + 1}` : ''}`}>{i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</div>
+                    <div className="avatar" style={{ width: 36, height: 36, fontSize: 14 }}>{u.avatar_url ? <img src={u.avatar_url} alt="" /> : u.name[0]}</div>
+                    <div className="leaderboard-info" style={{ flex: 1 }}>
+                        <h4>{u.name} {u.id === user?.id && <span style={{ color: 'var(--accent)', fontSize: 11 }}>(tú)</span>}</h4>
+                        <span>{getUserLevel(u.points).icon} {getUserLevel(u.points).name}</span>
+                    </div>
+                    <div className="leaderboard-points">{u.points}</div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+// ─── ProfilePage ───
+function ProfilePage() {
+    const { user, setUser, go, toast } = useApp();
+    const level = getUserLevel(user?.points || 0);
+    const [logs, setLogs] = useState<any[]>([]);
+
+    useEffect(() => { if (user) api.getUserPointLogs(user.id).then(l => setLogs(l.slice(0, 10))); }, [user]);
+
+    const logout = () => { setUser(null); go('login'); };
+
+    return (
+        <div className="fade-in">
+            <div className="profile-header">
+                <div className="profile-avatar">{user?.avatar_url ? <img src={user.avatar_url} alt="" /> : (user?.name?.[0] || '?')}</div>
+                <div className="profile-name">{user?.name}</div>
+                <div className="profile-email">{user?.email}</div>
+                <div style={{ marginTop: 8 }}><span className="badge badge-primary">{level.icon} {level.name}</span></div>
+                <div className="profile-stats">
+                    <div className="profile-stat"><div className="profile-stat-value">{user?.points || 0}</div><div className="profile-stat-label">Puntos</div></div>
+                    <div className="profile-stat"><div className="profile-stat-value">{user?.tower || '-'}</div><div className="profile-stat-label">Torre</div></div>
+                    <div className="profile-stat"><div className="profile-stat-value">{user?.apartment || '-'}</div><div className="profile-stat-label">Depto</div></div>
+                </div>
+            </div>
+
+            <div className="section-title" style={{ fontSize: 16 }}>Historial de Puntos</div>
+            {logs.length === 0 ? <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Sin actividad aún</p> :
+                logs.map(l => (
+                    <div key={l.id} className="card" style={{ marginBottom: 6, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div><span style={{ fontSize: 13, fontWeight: 600 }}>{l.action}</span><p style={{ fontSize: 11, color: 'var(--text-3)' }}>{l.description || ''}</p></div>
+                        <span style={{ color: 'var(--accent)', fontWeight: 700 }}>+{l.points}</span>
+                    </div>
+                ))
+            }
+            <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {!user?.community_id && <button className="btn btn-primary btn-full" onClick={() => go('join-community')}>Unirme a una torre</button>}
+                <button className="btn btn-danger btn-full" onClick={logout}>Cerrar sesión</button>
             </div>
         </div>
     );
-};
+}
 
-// --- Main App ---
+// ─── JoinCommunityPage ───
+function JoinCommunityPage() {
+    const { user, go, toast } = useApp();
+    const [communities, setCommunities] = useState<Community[]>([]);
+    const [selected, setSelected] = useState('');
+    const [tower, setTower] = useState('');
+    const [unit, setUnit] = useState('');
 
-export default function App() {
-    const [user, setUser] = useState<User | null>(null);
-    const [route, setRoute] = useState('home');
-    const [targetAmenity, setTargetAmenity] = useState<Amenity | null>(null);
-    const [isDarkMode, setIsDarkMode] = useState(false);
-    const [isRegisteringTower, setIsRegisteringTower] = useState(false);
-    const [isJoiningCommunity, setIsJoiningCommunity] = useState(false);
+    useEffect(() => { api.getCommunities().then(setCommunities); }, []);
 
-    // Initial Theme Check
-    useEffect(() => {
-        if (isDarkMode) document.documentElement.classList.add('dark');
-        else document.documentElement.classList.remove('dark');
-    }, [isDarkMode]);
-
-    const toggleTheme = () => setIsDarkMode(!isDarkMode);
-
-    const handleLogin = (u: User) => {
-        setUser(u);
-        setRoute('home');
+    const submit = async () => {
+        if (!selected || !user) return;
+        try {
+            await api.createJoinRequest({ community_id: selected, user_email: user.email, user_name: user.name, tower, unit });
+            toast('✅ Solicitud enviada al admin');
+            go('home');
+        } catch { toast('Error al enviar solicitud'); }
     };
-
-    if (isRegisteringTower) {
-        return <NewTowerPage onBack={() => setIsRegisteringTower(false)} onComplete={() => setIsRegisteringTower(false)} />;
-    }
-
-    if (isJoiningCommunity) {
-        return <JoinCommunityPage onBack={() => setIsJoiningCommunity(false)} />;
-    }
-
-    if (!user) return <LoginPage onLogin={handleLogin} onRegisterTower={() => setIsRegisteringTower(true)} onJoinCommunity={() => setIsJoiningCommunity(true)} />;
-
-    const renderPage = () => {
-        switch (route) {
-            case 'home': return <HomePage user={user} navigate={setRoute} />;
-            case 'community': return <CommunityPage user={user} />;
-            case 'leaderboard': return <LeaderboardPage user={user} />;
-            case 'amenities': return <AmenitiesPage navigate={setRoute} setTargetAmenity={setTargetAmenity} />;
-            case 'amenity_detail': return <AmenityDetailPage amenity={targetAmenity} user={user} navigate={setRoute} onBack={() => setRoute('amenities')} />;
-            case 'profile': return (
-                <div className="p-10 flex flex-col items-center justify-center h-[80vh] animate-fade-in">
-                    <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center text-primary mb-4">
-                        <span className="material-symbols-outlined text-4xl">person</span>
-                    </div>
-                    <h2 className="text-2xl font-bold text-slate-800 dark:text-white">{user.name}</h2>
-                    <p className="text-slate-500 mb-8">{user.email}</p>
-                    <button onClick={() => setUser(null)} className="text-red-500 hover:text-red-600 font-medium px-6 py-2 rounded-lg hover:bg-red-50 transition-colors">
-                        Cerrar Sesión
-                    </button>
-                </div>
-            );
-            default: return <HomePage user={user} navigate={setRoute} />;
-        }
-    };
-
-    const isFullScreen = route === 'amenity_detail';
 
     return (
-        <>
-            {isFullScreen ? (
-                renderPage()
-            ) : (
-                <Layout activeTab={route} onNavigate={setRoute} user={user} toggleTheme={toggleTheme} isDarkMode={isDarkMode}>
-                    {renderPage()}
-                </Layout>
-            )}
-        </>
+        <div className="fade-in">
+            <button className="btn btn-ghost btn-sm" onClick={() => go('profile')} style={{ marginBottom: 12 }}>
+                <span className="material-symbols-outlined">arrow_back</span> Volver
+            </button>
+            <h2 className="section-title">Unirme a una Torre</h2>
+            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Comunidad</label>
+            <select className="input" value={selected} onChange={e => setSelected(e.target.value)} style={{ marginBottom: 12 }}>
+                <option value="">Seleccionar...</option>
+                {communities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <input className="input" placeholder="Torre (ej: Torre A)" value={tower} onChange={e => setTower(e.target.value)} style={{ marginBottom: 12 }} />
+            <input className="input" placeholder="Departamento (ej: 205)" value={unit} onChange={e => setUnit(e.target.value)} style={{ marginBottom: 16 }} />
+            <button className="btn btn-primary btn-full" onClick={submit} disabled={!selected}>Enviar Solicitud</button>
+        </div>
+    );
+}
+
+// ─── AdminPage ───
+function AdminPage() {
+    const { user, go, toast } = useApp();
+    const [view, setView] = useState<'menu' | 'users' | 'audit' | 'requests' | 'analytics'>('menu');
+    const [allUsers, setAllUsers] = useState<User[]>([]);
+    const [reservations, setReservations] = useState<Reservation[]>([]);
+    const [requests, setRequests] = useState<any[]>([]);
+    const [analytics, setAnalytics] = useState<any>(null);
+
+    if (user?.role !== 'ADMIN') return <div className="empty-state"><p>Acceso denegado</p></div>;
+
+    const load = async (v: string) => {
+        setView(v as any);
+        if (v === 'users') api.getAllUsers().then(setAllUsers);
+        if (v === 'audit') api.getAllReservationsForAudit(user.community_id).then(setReservations);
+        if (v === 'requests' && user.community_id) api.getPendingRequests(user.community_id).then(setRequests);
+        if (v === 'analytics') api.getAnalytics(user.community_id).then(setAnalytics);
+    };
+
+    const grade = async (id: string, g: 'CUMPLIDA' | 'INCUMPLIDA') => {
+        await api.gradeReservation(id, g);
+        setReservations(r => r.map(x => x.id === id ? { ...x, grade: g, status: 'FINALIZADA' } : x));
+        toast(`Reserva marcada como ${g}`);
+    };
+
+    const approveReq = async (id: string) => {
+        await api.approveJoinRequest(id);
+        setRequests(r => r.filter(x => x.id !== id));
+        toast('Solicitud aprobada');
+    };
+
+    if (view === 'menu') return (
+        <div className="fade-in">
+            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>admin_panel_settings</span> Panel Admin</h2>
+            {[{ icon: 'people', title: 'Usuarios', desc: 'Gestionar vecinos', v: 'users' },
+            { icon: 'fact_check', title: 'Auditoría', desc: 'Calificar reservas', v: 'audit' },
+            { icon: 'mail', title: 'Solicitudes', desc: 'Aprobar ingresos', v: 'requests' },
+            { icon: 'analytics', title: 'Analytics', desc: 'Dashboard', v: 'analytics' }
+            ].map(item => (
+                <div key={item.v} className="admin-card" onClick={() => load(item.v)}>
+                    <div className="admin-card-icon"><span className="material-symbols-outlined">{item.icon}</span></div>
+                    <div className="admin-card-info"><h4>{item.title}</h4><p>{item.desc}</p></div>
+                    <span className="material-symbols-outlined" style={{ color: 'var(--text-3)' }}>chevron_right</span>
+                </div>
+            ))}
+            <button className="btn btn-ghost btn-full" style={{ marginTop: 16 }} onClick={() => go('home')}>Volver al inicio</button>
+        </div>
+    );
+
+    return (
+        <div className="fade-in">
+            <button className="btn btn-ghost btn-sm" onClick={() => setView('menu')} style={{ marginBottom: 12 }}>
+                <span className="material-symbols-outlined">arrow_back</span> Panel Admin
+            </button>
+
+            {view === 'users' && (<>
+                <h2 className="section-title">Usuarios ({allUsers.length})</h2>
+                {allUsers.map(u => (
+                    <div key={u.id} className="card" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div className="avatar">{u.name[0]}</div>
+                        <div style={{ flex: 1 }}><h4 style={{ fontSize: 14 }}>{u.name}</h4><p style={{ fontSize: 12, color: 'var(--text-3)' }}>{u.email} • {u.role}</p></div>
+                        <span className={`badge ${u.status === 'ACTIVO' ? 'badge-accent' : 'badge-danger'}`}>{u.status}</span>
+                    </div>
+                ))}
+            </>)}
+
+            {view === 'audit' && (<>
+                <h2 className="section-title">Auditoría</h2>
+                {reservations.filter(r => r.grade === 'PENDIENTE').map(r => (
+                    <div key={r.id} className="card" style={{ marginBottom: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <div><h4 style={{ fontSize: 14 }}>{(r as any).user?.name}</h4><p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.amenity?.name} • {r.date} • {r.time_slot}</p></div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn btn-accent btn-sm" onClick={() => grade(r.id, 'CUMPLIDA')}>✅ Cumplida</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => grade(r.id, 'INCUMPLIDA')}>❌ Incumplida</button>
+                        </div>
+                    </div>
+                ))}
+            </>)}
+
+            {view === 'requests' && (<>
+                <h2 className="section-title">Solicitudes Pendientes</h2>
+                {requests.length === 0 ? <p style={{ color: 'var(--text-3)' }}>No hay solicitudes</p> :
+                    requests.map(r => (
+                        <div key={r.id} className="card" style={{ marginBottom: 8 }}>
+                            <h4 style={{ fontSize: 14 }}>{r.user_name}</h4>
+                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.user_email} • {r.tower} {r.unit}</p>
+                            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                <button className="btn btn-accent btn-sm" onClick={() => approveReq(r.id)}>Aprobar</button>
+                                <button className="btn btn-danger btn-sm" onClick={() => { api.rejectJoinRequest(r.id); setRequests(rs => rs.filter(x => x.id !== r.id)); }}>Rechazar</button>
+                            </div>
+                        </div>
+                    ))
+                }
+            </>)}
+
+            {view === 'analytics' && analytics && (<>
+                <h2 className="section-title">Dashboard</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+                    {[{ label: 'Reservas', value: analytics.totalReservations, icon: 'event' },
+                    { label: 'Ocupación', value: `${analytics.occupancyRate}%`, icon: 'trending_up' },
+                    { label: 'Usuarios', value: analytics.totalUsers, icon: 'people' },
+                    { label: 'Posts', value: analytics.totalPosts, icon: 'forum' }
+                    ].map(s => (
+                        <div key={s.label} className="card" style={{ textAlign: 'center' }}>
+                            <span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>{s.icon}</span>
+                            <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{s.value}</div>
+                            <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{s.label}</div>
+                        </div>
+                    ))}
+                </div>
+                <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Por Espacio</h3>
+                {Object.entries(analytics.byAmenity).map(([name, count]) => (
+                    <div key={name} className="card" style={{ marginBottom: 6, padding: 12, display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: 14 }}>{name}</span>
+                        <span style={{ fontWeight: 700, color: 'var(--primary-light)' }}>{count as number}</span>
+                    </div>
+                ))}
+            </>)}
+        </div>
     );
 }
