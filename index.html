@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es" class="light"> <!-- Default to light mode -->
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Roomly - Gestión de Comunidad</title>
+    <link rel="icon" type="image/png" href="https://i.ibb.co/0VvpgLJn/el-pedregal-s-a-logo-1.png">
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: { 
+                extend: { 
+                    colors: { 
+                        "primary": "#7c3aed",       // Purple
+                        "primary-dark": "#5b21b6",
+                        "primary-light": "#ddd6fe",
+                        "bg-dark": "#0f172a",       // Deep Navy for Dark Mode
+                        "surface-dark": "#1e293b",
+                        "bg-light": "#f8fafc",      // Clean Slate for Light Mode
+                        "surface-light": "#ffffff",
+                    },
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'float': 'float 6s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        }
+                    }
+                } 
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Outfit', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Tower Animation CSS */
+        .tower-building {
+            position: relative;
+            width: 100px;
+            height: 160px;
+            background: repeating-linear-gradient(
+                to bottom,
+                currentColor 0,
+                currentColor 2px,
+                transparent 2px,
+                transparent 20px
+            );
+            border: 2px solid currentColor;
+            border-radius: 8px 8px 0 0;
+            opacity: 0.3;
+        }
+        .tower-window {
+            position: absolute;
+            width: 8px;
+            height: 12px;
+            background: currentColor;
+            opacity: 0;
+            animation: window-light 3s infinite;
+        }
+        @keyframes window-light {
+            0%, 100% { opacity: 0.1; }
+            50% { opacity: 0.8; }
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-bg-light dark:bg-bg-dark text-slate-800 dark:text-slate-100 select-none transition-colors duration-500">
+    <div id="root"></div>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>

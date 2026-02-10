@@ -1,0 +1,8 @@
+{
+  "name": "Roomly",
+  "description": "Gestión de comunidad y reservas para torres con sistema de gamificación.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
