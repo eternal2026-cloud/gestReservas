@@ -77,8 +77,13 @@ function TopBar() {
     const { toggleTheme, theme, go, user } = useApp();
     return (
         <div className="top-bar">
-            <div className="logo">
-                <div className="logo-icon"><span className="material-symbols-outlined" style={{ color: '#fff', fontSize: 20 }}>apartment</span></div>
+            <div className="logo" style={{ cursor: 'pointer' }} onClick={() => go('home')}>
+                <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="40" height="40" rx="12" fill="#7C3AED" />
+                    <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M20 28V22" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                    <circle cx="20" cy="16" r="2" fill="white" />
+                </svg>
                 <span className="logo-text">Roomly</span>
             </div>
             <div className="top-bar-actions">
@@ -190,6 +195,12 @@ function LoginPage() {
             </div>
             <div className="login-card">
                 <div className="login-logo">
+                    <svg width="80" height="80" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ margin: '0 auto', filter: 'drop-shadow(0 4px 12px rgba(124,58,237,0.4))' }}>
+                        <rect width="40" height="40" rx="12" fill="#7C3AED" />
+                        <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M20 28V22" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                        <circle cx="20" cy="16" r="2" fill="white" />
+                    </svg>
                     <h1>Roomly</h1>
                     <p>Tu comunidad, conectada</p>
                 </div>
