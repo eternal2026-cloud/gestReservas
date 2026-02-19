@@ -7,6 +7,8 @@ export interface Community {
     admin_email: string;
     total_floors: number;
     units_per_floor: number;
+    num_buildings: number;
+    rooms_per_floor: number;
     total_points: number;
     created_at: string;
 }
@@ -48,10 +50,19 @@ export interface Reservation {
     time_slot: string;
     status: 'ACTIVA' | 'CANCELADA' | 'FINALIZADA';
     grade: 'PENDIENTE' | 'CUMPLIDA' | 'INCUMPLIDA';
+    compliance_pct: number;
     created_at: string;
     // Joined fields
     amenity?: Amenity;
     user?: User;
+}
+
+export interface RejectionMessage {
+    id: string;
+    user_email: string;
+    message: string;
+    admin_name?: string;
+    created_at: string;
 }
 
 export interface Post {

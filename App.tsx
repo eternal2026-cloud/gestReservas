@@ -1,8 +1,9 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import * as api from './services/api';
 import type { User, Community, Amenity, Reservation, Post, ThemeMode, AppView } from './types';
 import { getUserLevel, POINT_ACTIONS } from './types';
 import { supabase } from './services/supabase';
+
 
 // ─── Context ───
 interface AppCtx {
@@ -19,10 +20,11 @@ const Ctx = createContext<AppCtx>({} as AppCtx);
 const useApp = () => useContext(Ctx);
 
 // ─── Toast ───
-function Toast({ msg, onClose }: { msg: string; onClose: () => void }) {
-    useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t); }, []);
+function Toast({ msg, onClose, duration = 3000 }: { msg: string; onClose: () => void; duration?: number }) {
+    useEffect(() => { const t = setTimeout(onClose, duration); return () => clearTimeout(t); }, []);
     return <div className="toast">{msg}</div>;
 }
+
 
 // ─── App Shell ───
 export default function App() {
@@ -33,11 +35,28 @@ export default function App() {
     const [view, setView] = useState<AppView>('login');
     const [viewData, setViewData] = useState<any>(null);
     const [toastMsg, setToastMsg] = useState('');
+    const [rejectionToast, setRejectionToast] = useState<{ msg: string; id: string } | null>(null);
+    const checkedRejections = useRef(false);
 
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('roomly-theme', theme);
     }, [theme]);
+
+    // Check rejection messages when user logs in
+    useEffect(() => {
+        if (!user || checkedRejections.current) return;
+        checkedRejections.current = true;
+        api.getRejectionMessagesForEmail(user.email).then(msgs => {
+            if (msgs.length > 0) {
+                const latest = msgs[0];
+                setRejectionToast({
+                    msg: `❌ Tu solicitud fue rechazada.\n${latest.admin_name || 'El administrador'} dijo: "${latest.message}"`,
+                    id: latest.id
+                });
+            }
+        });
+    }, [user]);
 
     const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
     const go = (v: AppView, data?: any) => { setView(v); setViewData(data); window.scrollTo(0, 0); };
@@ -67,10 +86,26 @@ export default function App() {
                     </>
                 )}
                 {toastMsg && <Toast msg={toastMsg} onClose={() => setToastMsg('')} />}
+                {rejectionToast && (
+                    <div className="toast" style={{
+                        background: 'var(--danger)',
+                        whiteSpace: 'pre-line',
+                        lineHeight: 1.5,
+                        maxWidth: 320,
+                        padding: '14px 18px'
+                    }}>
+                        {rejectionToast.msg}
+                        <button onClick={() => {
+                            api.deleteRejectionMessage(rejectionToast.id);
+                            setRejectionToast(null);
+                        }} style={{ marginLeft: 10, background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 700 }}>✕</button>
+                    </div>
+                )}
             </div>
         </Ctx.Provider>
     );
 }
+
 
 // ─── TopBar ───
 function TopBar() {
@@ -408,14 +443,33 @@ function AmenityDetailPage() {
 // ─── BookingPage ───
 function BookingPage() {
     const { viewData: amenity, user, go, toast } = useApp();
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+    // Helper: current date/time in Peru (UTC-5, no DST)
+    const getPeruNow = () => {
+        const now = new Date();
+        const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+        return new Date(utc + (-5 * 60) * 60000);
+    };
+
+    const peruNow = getPeruNow();
+    const todayPeru = peruNow.toISOString().split('T')[0];
+
+    const [date, setDate] = useState(todayPeru);
     const [slot, setSlot] = useState('');
     const [booked, setBooked] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
-    const slots = ['08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00', '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00', '19:00-20:00'];
+    const allSlots = ['08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00', '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00', '19:00-20:00'];
+
+    // Slots whose start hour is already past (only relevant if date = today)
+    const isPastSlot = (s: string) => {
+        if (date !== todayPeru) return false;
+        const startHour = parseInt(s.split(':')[0], 10);
+        return peruNow.getHours() >= startHour;
+    };
 
     useEffect(() => {
         if (amenity) api.getAmenityReservations(amenity.id, date).then(r => setBooked(r.map(x => x.time_slot)));
+        setSlot('');
     }, [amenity, date]);
 
     const handleBook = async () => {
@@ -453,13 +507,27 @@ function BookingPage() {
             </button>
             <h2 className="section-title">Reservar {amenity.name}</h2>
             <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Fecha</label>
-            <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} style={{ marginBottom: 16 }} />
+            <input className="input" type="date" value={date} min={todayPeru} onChange={e => setDate(e.target.value)} style={{ marginBottom: 16 }} />
             <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Horario</label>
+            {date === todayPeru && (
+                <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8 }}>
+                    🕐 Hora actual en Perú: {peruNow.getHours().toString().padStart(2, '0')}:{peruNow.getMinutes().toString().padStart(2, '0')}
+                </p>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
-                {slots.map(s => (
-                    <div key={s} className={`time-slot ${slot === s ? 'selected' : ''} ${booked.includes(s) ? 'disabled' : ''}`}
-                        onClick={() => !booked.includes(s) && setSlot(s)}>{s} {booked.includes(s) && '🔒'}</div>
-                ))}
+                {allSlots.map(s => {
+                    const past = isPastSlot(s);
+                    const occupied = booked.includes(s);
+                    const disabled = occupied || past;
+                    return (
+                        <div key={s}
+                            className={`time-slot ${slot === s ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}
+                            onClick={() => !disabled && setSlot(s)}
+                            title={past ? 'Horario ya pasado' : occupied ? 'Ocupado' : ''}>
+                            {s} {occupied ? '🔒' : past ? '⏰' : ''}
+                        </div>
+                    );
+                })}
             </div>
             {slot && (
                 <div className="card" style={{ marginBottom: 16 }}>
@@ -790,6 +858,15 @@ function JoinCommunityPage() {
     const [createMode, setCreateMode] = useState(viewData?.createMode || false);
     const [newName, setNewName] = useState('');
     const [newAddress, setNewAddress] = useState('');
+    // Tower config fields (create mode)
+    const [numBuildings, setNumBuildings] = useState(1);
+    const [numFloors, setNumFloors] = useState(10);
+    const [roomsPerFloor, setRoomsPerFloor] = useState(4);
+    const [adminFloor, setAdminFloor] = useState(1);
+    const [adminRoom, setAdminRoom] = useState(1);
+
+    // Auto-generate apartment number: floor*100 + room
+    const adminApartment = String(adminFloor * 100 + adminRoom);
 
     useEffect(() => { api.getCommunities().then(setCommunities); }, []);
 
@@ -811,13 +888,18 @@ function JoinCommunityPage() {
             const community = await api.createCommunity({
                 name: newName.trim(),
                 address: newAddress.trim(),
-                admin_email: user.email // Enviar el email del admin para cumplir con la restricción de la BD
+                admin_email: user.email,
+                // @ts-ignore - extra fields: sent to Supabase directly
+                num_buildings: numBuildings,
+                total_floors: numFloors,
+                rooms_per_floor: roomsPerFloor,
+                units_per_floor: roomsPerFloor,
             });
             const updated = await api.updateUserProfile(user.id, {
-                community_id: community.id, role: 'ADMIN', tower: tower || 'Torre A', apartment: unit || '101'
+                community_id: community.id, role: 'ADMIN', tower: tower || 'Torre A', apartment: adminApartment
             });
             setUser(updated);
-            toast('✅ Torre creada. ¡Eres el administrador!');
+            toast(`✅ Torre creada. Tu depto: ${adminApartment}. ¡Eres el administrador!`);
             go('home');
         } catch (e: any) { toast('Error: ' + (e.message || 'No se pudo crear')); }
         setLoading(false);
@@ -859,10 +941,54 @@ function JoinCommunityPage() {
                     <input className="input" placeholder="Ej: Torre Pedregal" value={newName} onChange={e => setNewName(e.target.value)} style={{ marginBottom: 12 }} />
                     <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Dirección</label>
                     <input className="input" placeholder="Ej: Av. Principal #123" value={newAddress} onChange={e => setNewAddress(e.target.value)} style={{ marginBottom: 12 }} />
-                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tu bloque</label>
+
+                    {/* Tower structure config */}
+                    <div style={{ background: 'var(--bg-3)', borderRadius: 12, padding: 14, marginBottom: 12 }}>
+                        <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>🏗️ Configuración de la torre</p>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+                            <div>
+                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Edificios</label>
+                                <input className="input" type="number" min={1} max={20} value={numBuildings}
+                                    onChange={e => setNumBuildings(Math.max(1, parseInt(e.target.value) || 1))}
+                                    style={{ padding: '8px', textAlign: 'center' }} />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Pisos</label>
+                                <input className="input" type="number" min={1} max={50} value={numFloors}
+                                    onChange={e => setNumFloors(Math.max(1, parseInt(e.target.value) || 1))}
+                                    style={{ padding: '8px', textAlign: 'center' }} />
+                            </div>
+                            <div>
+                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Deptos/piso</label>
+                                <input className="input" type="number" min={1} max={20} value={roomsPerFloor}
+                                    onChange={e => setRoomsPerFloor(Math.max(1, parseInt(e.target.value) || 1))}
+                                    style={{ padding: '8px', textAlign: 'center' }} />
+                            </div>
+                        </div>
+                        <p style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                            Total: {numFloors * roomsPerFloor * numBuildings} departamentos · Numeración: piso{numFloors > 0 ? ' ' + numFloors : ''}, depto {numFloors * 100 + 1} – {numFloors * 100 + roomsPerFloor}
+                        </p>
+                    </div>
+
+                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tu bloque / torre</label>
                     <input className="input" placeholder="Ej: Torre A" value={tower} onChange={e => setTower(e.target.value)} style={{ marginBottom: 12 }} />
-                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tu departamento</label>
-                    <input className="input" placeholder="Ej: 101" value={unit} onChange={e => setUnit(e.target.value)} style={{ marginBottom: 16 }} />
+                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tu piso y depto (auto-generado)</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 4 }}>
+                        <div>
+                            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Piso</label>
+                            <input className="input" type="number" min={1} max={numFloors} value={adminFloor}
+                                onChange={e => setAdminFloor(Math.min(numFloors, Math.max(1, parseInt(e.target.value) || 1)))}
+                                style={{ padding: '8px', textAlign: 'center' }} />
+                        </div>
+                        <div>
+                            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Depto en piso</label>
+                            <input className="input" type="number" min={1} max={roomsPerFloor} value={adminRoom}
+                                onChange={e => setAdminRoom(Math.min(roomsPerFloor, Math.max(1, parseInt(e.target.value) || 1)))}
+                                style={{ padding: '8px', textAlign: 'center' }} />
+                        </div>
+                    </div>
+                    <p style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: 16 }}>Número de depto asignado: <strong>{adminApartment}</strong></p>
+
                     <button className="btn btn-primary btn-full" onClick={submitCreate} disabled={!newName.trim() || loading}>
                         {loading ? 'Creando...' : 'Crear torre y ser admin'}
                     </button>
@@ -883,6 +1009,10 @@ function AdminPage() {
     const [analytics, setAnalytics] = useState<any>(null);
     const [amenities, setAmenities] = useState<Amenity[]>([]);
     const [showCreateSpace, setShowCreateSpace] = useState(false);
+    const [complianceMap, setComplianceMap] = useState<Record<string, number>>({}); // reservationId -> %
+    const [rejectTarget, setRejectTarget] = useState<string | null>(null); // requestId being rejected
+    const [rejectMsg, setRejectMsg] = useState('');
+    const [towerUserCounts, setTowerUserCounts] = useState<Record<string, number>>({}); // tower -> count
 
     // Create space form state
     const [spaceName, setSpaceName] = useState('');
@@ -924,21 +1054,40 @@ function AdminPage() {
         setView(v as any);
         if (v === 'users') api.getAllUsers().then(setAllUsers);
         if (v === 'audit') api.getAllReservationsForAudit(user.community_id).then(setReservations);
-        if (v === 'requests' && user.community_id) api.getPendingRequests(user.community_id).then(setRequests);
+        if (v === 'requests' && user.community_id) {
+            const reqs = await api.getPendingRequests(user.community_id);
+            setRequests(reqs);
+            // Count existing users per tower
+            if (user.community_id) {
+                const communityUsers = await api.getCommunityUsers(user.community_id);
+                const counts: Record<string, number> = {};
+                communityUsers.forEach(u => { if (u.tower) counts[u.tower] = (counts[u.tower] || 0) + 1; });
+                setTowerUserCounts(counts);
+            }
+        }
         if (v === 'analytics') api.getAnalytics(user.community_id).then(setAnalytics);
         if (v === 'spaces') api.getAmenities(user.community_id).then(setAmenities);
     };
 
     const grade = async (id: string, g: 'CUMPLIDA' | 'INCUMPLIDA') => {
-        await api.gradeReservation(id, g);
-        setReservations(r => r.map(x => x.id === id ? { ...x, grade: g, status: 'FINALIZADA' } : x));
-        toast(`Reserva marcada como ${g}`);
+        const pct = complianceMap[id] !== undefined ? complianceMap[id] : (g === 'CUMPLIDA' ? 100 : 0);
+        await api.gradeReservation(id, g, pct);
+        setReservations(r => r.map(x => x.id === id ? { ...x, grade: g, status: 'FINALIZADA', compliance_pct: pct } : x));
+        toast(`Reserva marcada como ${g} (${pct}%)`);
     };
 
     const approveReq = async (id: string) => {
         await api.approveJoinRequest(id);
         setRequests(r => r.filter(x => x.id !== id));
         toast('Solicitud aprobada');
+    };
+
+    const doReject = async (id: string) => {
+        await api.rejectJoinRequest(id, rejectMsg.trim() || undefined, user?.name);
+        setRequests(rs => rs.filter(x => x.id !== id));
+        setRejectTarget(null);
+        setRejectMsg('');
+        toast('Solicitud rechazada');
     };
 
     const selectPreset = (preset: typeof SPACE_PRESETS[0]) => {
@@ -1147,10 +1296,22 @@ function AdminPage() {
 
             {view === 'audit' && (<>
                 <h2 className="section-title">Auditoría</h2>
+                <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>Ajusta el % de cumplimiento antes de calificar.</p>
                 {reservations.filter(r => r.grade === 'PENDIENTE').map(r => (
                     <div key={r.id} className="card" style={{ marginBottom: 8 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                             <div><h4 style={{ fontSize: 14 }}>{(r as any).user?.name}</h4><p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.amenity?.name} • {r.date} • {r.time_slot}</p></div>
+                        </div>
+                        {/* Compliance slider */}
+                        <div style={{ marginBottom: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>
+                                <span>% Cumplimiento</span>
+                                <span style={{ fontWeight: 700, color: 'var(--accent)' }}>{complianceMap[r.id] !== undefined ? complianceMap[r.id] : 100}%</span>
+                            </div>
+                            <input type="range" min="0" max="100" step="5"
+                                value={complianceMap[r.id] !== undefined ? complianceMap[r.id] : 100}
+                                onChange={e => setComplianceMap(m => ({ ...m, [r.id]: Number(e.target.value) }))}
+                                style={{ width: '100%', accentColor: 'var(--accent)' }} />
                         </div>
                         <div style={{ display: 'flex', gap: 8 }}>
                             <button className="btn btn-accent btn-sm" onClick={() => grade(r.id, 'CUMPLIDA')}>✅ Cumplida</button>
@@ -1167,10 +1328,28 @@ function AdminPage() {
                         <div key={r.id} className="card" style={{ marginBottom: 8 }}>
                             <h4 style={{ fontSize: 14 }}>{r.user_name}</h4>
                             <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.user_email} • {r.tower} {r.unit}</p>
-                            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                                <button className="btn btn-accent btn-sm" onClick={() => approveReq(r.id)}>Aprobar</button>
-                                <button className="btn btn-danger btn-sm" onClick={() => { api.rejectJoinRequest(r.id); setRequests(rs => rs.filter(x => x.id !== r.id)); }}>Rechazar</button>
-                            </div>
+                            {r.tower && towerUserCounts[r.tower] !== undefined && (
+                                <p style={{ fontSize: 11, color: 'var(--primary-light)', marginTop: 2 }}>
+                                    🏢 {towerUserCounts[r.tower]} vecino{towerUserCounts[r.tower] !== 1 ? 's' : ''} ya en {r.tower}
+                                </p>
+                            )}
+                            {rejectTarget === r.id ? (
+                                <div style={{ marginTop: 10, padding: '10px', background: 'var(--bg-3)', borderRadius: 10 }}>
+                                    <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Razón del rechazo (opcional):</p>
+                                    <textarea className="input" rows={2} style={{ fontSize: 13, width: '100%', marginBottom: 8 }}
+                                        placeholder="Ej: El departamento indicado no existe..."
+                                        value={rejectMsg} onChange={e => setRejectMsg(e.target.value)} />
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <button className="btn btn-danger btn-sm" onClick={() => doReject(r.id)}>Confirmar rechazo</button>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => { setRejectTarget(null); setRejectMsg(''); }}>Cancelar</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                    <button className="btn btn-accent btn-sm" onClick={() => approveReq(r.id)}>Aprobar</button>
+                                    <button className="btn btn-danger btn-sm" onClick={() => { setRejectTarget(r.id); setRejectMsg(''); }}>Rechazar</button>
+                                </div>
+                            )}
                         </div>
                     ))
                 }

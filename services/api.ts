@@ -82,6 +82,18 @@ export async function getCommunityUsers(communityId: string): Promise<User[]> {
     return data || [];
 }
 
+export async function getTowerUsers(communityId: string, tower: string): Promise<User[]> {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('community_id', communityId)
+        .eq('tower', tower)
+        .eq('status', 'ACTIVO');
+    if (error) return [];
+    return data || [];
+}
+
+
 export async function getAllUsers(): Promise<User[]> {
     const { data, error } = await supabase
         .from('users')
@@ -229,10 +241,10 @@ export async function cancelReservation(reservationId: string): Promise<void> {
     if (error) throw error;
 }
 
-export async function gradeReservation(reservationId: string, grade: 'CUMPLIDA' | 'INCUMPLIDA'): Promise<void> {
+export async function gradeReservation(reservationId: string, grade: 'CUMPLIDA' | 'INCUMPLIDA', compliance_pct: number = 100): Promise<void> {
     const { error } = await supabase
         .from('reservations')
-        .update({ grade, status: 'FINALIZADA' })
+        .update({ grade, status: 'FINALIZADA', compliance_pct })
         .eq('id', reservationId);
     if (error) throw error;
 }
@@ -372,12 +384,41 @@ export async function approveJoinRequest(requestId: string): Promise<void> {
     }
 }
 
-export async function rejectJoinRequest(requestId: string): Promise<void> {
+export async function rejectJoinRequest(requestId: string, reason?: string, adminName?: string): Promise<void> {
+    const { data: request, error: fetchError } = await supabase
+        .from('join_requests')
+        .select('user_email')
+        .eq('id', requestId)
+        .single();
+    if (fetchError) throw fetchError;
+
     const { error } = await supabase
         .from('join_requests')
         .update({ status: 'RECHAZADA' })
         .eq('id', requestId);
     if (error) throw error;
+
+    // Store rejection message for up to 1 day (auto-cleaned by DB trigger)
+    if (reason && request?.user_email) {
+        await supabase.from('rejection_messages').insert({
+            user_email: request.user_email,
+            message: reason,
+            admin_name: adminName || 'El administrador',
+        });
+    }
+}
+
+export async function getRejectionMessagesForEmail(email: string) {
+    const { data } = await supabase
+        .from('rejection_messages')
+        .select('*')
+        .eq('user_email', email)
+        .order('created_at', { ascending: false });
+    return data || [];
+}
+
+export async function deleteRejectionMessage(id: string) {
+    await supabase.from('rejection_messages').delete().eq('id', id);
 }
 
 // ─── Points ───

@@ -9,8 +9,10 @@ CREATE TABLE IF NOT EXISTS communities (
   name TEXT NOT NULL,
   address TEXT,
   admin_email TEXT NOT NULL,
-  total_floors INT DEFAULT 20,
+  total_floors INT DEFAULT 10,
   units_per_floor INT DEFAULT 4,
+  num_buildings INT DEFAULT 1,
+  rooms_per_floor INT DEFAULT 4,
   total_points INT DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS reservations (
   time_slot TEXT NOT NULL,
   status TEXT DEFAULT 'ACTIVA' CHECK (status IN ('ACTIVA','CANCELADA','FINALIZADA')),
   grade TEXT DEFAULT 'PENDIENTE' CHECK (grade IN ('PENDIENTE','CUMPLIDA','INCUMPLIDA')),
+  compliance_pct INT DEFAULT 100,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
