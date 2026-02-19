@@ -161,6 +161,33 @@ export async function createAmenity(amenity: Partial<Amenity>): Promise<Amenity>
     return data;
 }
 
+export async function updateAmenity(amenityId: string, updates: Partial<Amenity>): Promise<Amenity> {
+    const { data, error } = await supabase
+        .from('amenities')
+        .update(updates)
+        .eq('id', amenityId)
+        .select()
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+export async function deleteAmenity(amenityId: string): Promise<void> {
+    const { error } = await supabase.from('amenities').delete().eq('id', amenityId);
+    if (error) throw error;
+}
+
+export async function uploadAmenityImage(amenityId: string, file: File): Promise<string> {
+    const ext = file.name.split('.').pop();
+    const path = `amenities/${amenityId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage
+        .from('post-images')
+        .upload(path, file, { upsert: true });
+    if (error) throw error;
+    const { data } = supabase.storage.from('post-images').getPublicUrl(path);
+    return data.publicUrl;
+}
+
 // ─── Reservations ───
 
 export async function getUserReservations(userId: string): Promise<Reservation[]> {
