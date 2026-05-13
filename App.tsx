@@ -3,6 +3,14 @@ import * as api from './services/api';
 import type { User, Community, Amenity, Reservation, Post, ThemeMode, AppView } from './types';
 import { getUserLevel, POINT_ACTIONS } from './types';
 import { supabase } from './services/supabase';
+import { Loader } from './components/Loader';
+import { ViewTransition } from './components/ViewTransition';
+import { Splash } from './components/Splash';
+import { SuperAdminPage } from './pages/SuperAdminPage';
+import { SanctionsPage } from './pages/SanctionsPage';
+import { QrAccessPage } from './pages/QrAccessPage';
+import { generateStructure, flatApartments, communityTypeLabel } from './services/structure';
+import anime from 'animejs';
 
 
 // ─── Context ───
@@ -28,6 +36,7 @@ function Toast({ msg, onClose, duration = 3000 }: { msg: string; onClose: () => 
 
 // ─── App Shell ───
 export default function App() {
+    const [splashDone, setSplashDone] = useState(false);
     const [user, setUser] = useState<User | null>(null);
     const [theme, setTheme] = useState<ThemeMode>(() =>
         (localStorage.getItem('roomly-theme') as ThemeMode) || 'dark'
@@ -66,21 +75,30 @@ export default function App() {
 
     return (
         <Ctx.Provider value={ctx}>
+            {!splashDone && <Splash onDone={() => setSplashDone(true)} />}
             <div className="app-container">
                 {view === 'login' ? <LoginPage /> : (
                     <>
                         <TopBar />
                         <div className="main-content">
-                            {view === 'home' && <HomePage />}
-                            {view === 'amenities' && <AmenitiesPage />}
-                            {view === 'amenity-detail' && <AmenityDetailPage />}
-                            {view === 'booking' && <BookingPage />}
-                            {view === 'my-reservations' && <MyReservationsPage />}
-                            {view === 'community' && <CommunityPage />}
-                            {view === 'leaderboard' && <LeaderboardPage />}
-                            {view === 'profile' && <ProfilePage />}
-                            {view === 'join-community' && <JoinCommunityPage />}
-                            {view === 'admin' && <AdminPage />}
+                            <ViewTransition viewKey={view} direction={view === 'home' ? 'scale' : 'up'}>
+                                {view === 'home' && <HomePage />}
+                                {view === 'amenities' && <AmenitiesPage />}
+                                {view === 'amenity-detail' && <AmenityDetailPage />}
+                                {view === 'booking' && <BookingPage />}
+                                {view === 'my-reservations' && <MyReservationsPage />}
+                                {view === 'community' && <CommunityPage />}
+                                {view === 'leaderboard' && <LeaderboardPage />}
+                                {view === 'profile' && <ProfilePage />}
+                                {view === 'join-community' && <JoinCommunityPage />}
+                                {view === 'admin' && <AdminPage />}
+                                {view === 'super-admin' && user?.role === 'SUPER_ADMIN' && (
+                                    <SuperAdminPage onBack={() => go('home')} onToast={toast} />
+                                )}
+                                {view === 'qr-access' && user && (
+                                    <QrAccessPage user={user} onBack={() => go('home')} onToast={toast} />
+                                )}
+                            </ViewTransition>
                         </div>
                         <BottomNav />
                     </>
@@ -126,8 +144,14 @@ function TopBar() {
                     <span className="material-symbols-outlined">{theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
                 </button>
                 {user?.role === 'ADMIN' && (
-                    <button className="icon-btn" onClick={() => go('admin')}>
+                    <button className="icon-btn" onClick={() => go('admin')} title="Panel Admin">
                         <span className="material-symbols-outlined">admin_panel_settings</span>
+                    </button>
+                )}
+                {user?.role === 'SUPER_ADMIN' && (
+                    <button className="icon-btn" onClick={() => go('super-admin')} title="Panel Super Admin"
+                        style={{ color: '#f59e0b' }}>
+                        <span className="material-symbols-outlined">shield_person</span>
                     </button>
                 )}
             </div>
@@ -170,6 +194,72 @@ function LoginPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [emailSent, setEmailSent] = useState(false);
+    const [showRecovery, setShowRecovery] = useState(false);
+    const [recoveryEmail, setRecoveryEmail] = useState('');
+
+    // Animación de entrada visible al cargar
+    const cardRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!cardRef.current) return;
+        const tl = anime.timeline({ easing: 'easeOutCubic' });
+        tl.add({
+            targets: cardRef.current.querySelectorAll('.tower-floor'),
+            opacity: [0, 1],
+            translateY: [40, 0],
+            scaleX: [0.3, 1],
+            delay: anime.stagger(60, { from: 'last' }),
+            duration: 700,
+        })
+        .add({
+            targets: cardRef.current.querySelector('.login-logo svg'),
+            scale: [0, 1],
+            rotate: [-180, 0],
+            duration: 800,
+            easing: 'spring(1, 80, 10, 0)',
+        }, '-=600')
+        .add({
+            targets: cardRef.current.querySelector('.login-logo h1'),
+            opacity: [0, 1],
+            translateY: [16, 0],
+            duration: 500,
+        }, '-=500')
+        .add({
+            targets: cardRef.current.querySelector('.login-logo p'),
+            opacity: [0, 1],
+            translateY: [10, 0],
+            duration: 400,
+        }, '-=300')
+        .add({
+            targets: cardRef.current.querySelectorAll('.login-form > div, .login-form button'),
+            opacity: [0, 1],
+            translateX: [-20, 0],
+            delay: anime.stagger(80),
+            duration: 420,
+        }, '-=200')
+        .add({
+            targets: cardRef.current.querySelectorAll('.login-bg-orb'),
+            scale: [0.5, 1],
+            opacity: [0, 0.7],
+            duration: 800,
+        }, '-=600');
+    }, [emailSent, showRecovery, isRegister]);
+
+    const handleRecovery = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+        try {
+            const { error: err } = await supabase.auth.resetPasswordForEmail(recoveryEmail, {
+                redirectTo: window.location.origin,
+            });
+            if (err) throw err;
+            toast('✉️ Revisa tu correo para restablecer la clave');
+            setShowRecovery(false);
+        } catch (e: any) {
+            setError(e.message || 'Error al enviar correo');
+        }
+        setLoading(false);
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -216,7 +306,7 @@ function LoginPage() {
     };
 
     if (emailSent) return (
-        <div className="login-container">
+        <div className="login-container" ref={cardRef}>
             <div className="login-bg-orb login-bg-orb-1" />
             <div className="login-bg-orb login-bg-orb-2" />
             <div className="login-card" style={{ textAlign: 'center' }}>
@@ -233,15 +323,44 @@ function LoginPage() {
         </div>
     );
 
-    return (
-        <div className="login-container">
+    if (showRecovery) return (
+        <div className="login-container" ref={cardRef}>
             <div className="login-bg-orb login-bg-orb-1" />
             <div className="login-bg-orb login-bg-orb-2" />
-            <div className="tower-animation">
+            <div className="login-card">
+                <div className="login-logo">
+                    <svg width="80" height="80" viewBox="0 0 40 40" fill="none">
+                        <rect width="40" height="40" rx="12" fill="#7C3AED" />
+                        <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                        <circle cx="20" cy="16" r="2" fill="white" />
+                    </svg>
+                    <h1>Recuperar clave</h1>
+                    <p>Te enviaremos un enlace a tu correo</p>
+                </div>
+                {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>{error}</div>}
+                <form className="login-form" onSubmit={handleRecovery}>
+                    <div><label>Correo electrónico</label><input className="input" type="email" placeholder="tu@email.com" value={recoveryEmail} onChange={e => setRecoveryEmail(e.target.value)} required /></div>
+                    <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
+                        {loading ? 'Enviando…' : 'Enviar enlace'}
+                    </button>
+                </form>
+                <button className="btn btn-ghost btn-full" style={{ marginTop: 8 }} onClick={() => { setShowRecovery(false); setError(''); }}>
+                    ← Volver a iniciar sesión
+                </button>
+            </div>
+        </div>
+    );
+
+    return (
+        <div className="login-container" ref={cardRef}>
+            <div className="login-bg-orb login-bg-orb-1" />
+            <div className="login-bg-orb login-bg-orb-2" />
+            <div className="tower-animation" style={{ pointerEvents: 'none' }}>
                 {Array.from({ length: 18 }).map((_, i) => (
                     <div key={i} className="tower-floor" style={{
-                        width: `${60 + Math.random() * 40}%`, margin: '0 auto',
-                        animationDelay: `${i * 0.15}s`
+                        width: `${60 + ((i * 37) % 40)}%`, margin: '0 auto',
+                        opacity: 0,
+                        animation: 'none',
                     }} />
                 ))}
             </div>
@@ -262,7 +381,18 @@ function LoginPage() {
                         <div><label>Nombre</label><input className="input" placeholder="Tu nombre" value={name} onChange={e => setName(e.target.value)} required /></div>
                     )}
                     <div><label>Correo electrónico</label><input className="input" type="email" placeholder="tu@email.com" value={email} onChange={e => setEmail(e.target.value)} required /></div>
-                    <div><label>Contraseña</label><input className="input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required /></div>
+                    <div>
+                        <label>Contraseña</label>
+                        <input className="input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required />
+                        {!isRegister && (
+                            <div style={{ textAlign: 'right', marginTop: 6 }}>
+                                <button type="button" onClick={() => { setShowRecovery(true); setRecoveryEmail(email); setError(''); }}
+                                    style={{ background: 'none', border: 'none', color: 'var(--primary-light)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
+                                    ¿Olvidaste tu clave?
+                                </button>
+                            </div>
+                        )}
+                    </div>
                     <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
                         {loading ? 'Cargando...' : isRegister ? 'Crear cuenta' : 'Iniciar sesión'}
                     </button>
@@ -316,22 +446,27 @@ function HomePage() {
             ) : (
                 <>
                     {/* Quick actions */}
-                    <div style={{ display: 'grid', gridTemplateColumns: user?.role === 'ADMIN' ? '1fr 1fr 1fr' : '1fr 1fr', gap: 12, marginBottom: 24 }}>
-                        <div className="card" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('amenities')}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
+                        <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('amenities')}>
                             <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--primary-light)' }}>add_circle</span>
-                            <h4 style={{ fontSize: 14, marginTop: 8 }}>Nueva Reserva</h4>
-                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Espacios comunes</p>
+                            <h4 style={{ fontSize: 14, marginTop: 8 }}>Reservar</h4>
+                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Espacios</p>
                         </div>
-                        <div className="card" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('leaderboard')}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--accent)' }}>leaderboard</span>
-                            <h4 style={{ fontSize: 14, marginTop: 8 }}>Clasificación</h4>
-                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Top vecinos</p>
+                        <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('qr-access')}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--accent)' }}>qr_code_2</span>
+                            <h4 style={{ fontSize: 14, marginTop: 8 }}>Mi QR</h4>
+                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Acceso</p>
+                        </div>
+                        <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('leaderboard')}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 32, color: '#f59e0b' }}>leaderboard</span>
+                            <h4 style={{ fontSize: 14, marginTop: 8 }}>Ranking</h4>
+                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Top vecinos</p>
                         </div>
                         {user?.role === 'ADMIN' && (
-                            <div className="card" style={{ cursor: 'pointer', textAlign: 'center', border: '1px solid var(--primary-light)' }} onClick={() => go('admin')}>
+                            <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center', border: '1px solid var(--primary-light)', gridColumn: '1 / -1' }} onClick={() => go('admin')}>
                                 <span className="material-symbols-outlined" style={{ fontSize: 32, color: '#f59e0b' }}>admin_panel_settings</span>
-                                <h4 style={{ fontSize: 14, marginTop: 8 }}>Admin</h4>
-                                <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Panel de gestión</p>
+                                <h4 style={{ fontSize: 14, marginTop: 8 }}>Panel Admin</h4>
+                                <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Sanciones, reglas, solicitudes y más</p>
                             </div>
                         )}
                     </div>
@@ -389,7 +524,7 @@ function AmenitiesPage() {
             <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>search</span> Espacios Comunes</h2>
             {loading ? Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 240, marginBottom: 16 }} />) :
                 amenities.map(a => (
-                    <div key={a.id} className="amenity-card" onClick={() => go('amenity-detail', a)}>
+                    <div key={a.id} className="amenity-card stagger-item" onClick={() => go('amenity-detail', a)}>
                         <img className="amenity-card-img" src={a.image_url || 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800'} alt={a.name} />
                         <div className="amenity-card-body">
                             <h3>{a.name}</h3>
@@ -458,6 +593,7 @@ function BookingPage() {
     const [slot, setSlot] = useState('');
     const [booked, setBooked] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
+    const [eligibility, setEligibility] = useState<api.Eligibility | null>(null);
     const allSlots = ['08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00', '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00', '19:00-20:00'];
 
     // Slots whose start hour is already past (only relevant if date = today)
@@ -467,10 +603,19 @@ function BookingPage() {
         return peruNow.getHours() >= startHour;
     };
 
+    // Motor de elegibilidad: sanciones + restricciones (Hoja1 #10, #11)
+    useEffect(() => {
+        if (amenity && user) {
+            api.getEligibility(user, amenity.id).then(setEligibility);
+        }
+    }, [amenity, user]);
+
     useEffect(() => {
         if (amenity) api.getAmenityReservations(amenity.id, date).then(r => setBooked(r.map(x => x.time_slot)));
         setSlot('');
     }, [amenity, date]);
+
+    const dateBlocked = eligibility?.blockedDates.includes(date) || false;
 
     const handleBook = async () => {
         if (!slot || !user || !amenity) return;
@@ -491,9 +636,9 @@ function BookingPage() {
                     return;
                 }
             }
-            await api.createReservation({ user_id: user.id, amenity_id: amenity.id, date, time_slot: slot });
+            const created = await api.createReservation({ user_id: user.id, amenity_id: amenity.id, date, time_slot: slot });
             if (user.community_id) await api.awardPoints(user.id, user.community_id, 'RESERVATION_COMPLETED', amenity.points_reward || 10, `Reserva en ${amenity.name}`);
-            toast('✅ Reserva confirmada');
+            toast(`✅ Reserva ${created.code || 'confirmada'} · ${amenity.name}`);
             go('my-reservations');
         } catch (e: any) { toast('❌ ' + (e.message || 'Error')); }
         setLoading(false);
@@ -506,8 +651,29 @@ function BookingPage() {
                 <span className="material-symbols-outlined">arrow_back</span> Volver
             </button>
             <h2 className="section-title">Reservar {amenity.name}</h2>
-            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Fecha</label>
-            <input className="input" type="date" value={date} min={todayPeru} onChange={e => setDate(e.target.value)} style={{ marginBottom: 16 }} />
+
+            {eligibility && eligibility.reasons.length > 0 && (
+                <div className="card stagger-item" style={{
+                    marginBottom: 14, padding: 12,
+                    background: 'rgba(245,158,11,0.1)', border: '1px solid var(--warning)',
+                }}>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--warning)', marginBottom: 4 }}>⚠️ Reglas vigentes</p>
+                    {eligibility.reasons.map((r, i) => (
+                        <p key={i} style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.5 }}>• {r}</p>
+                    ))}
+                </div>
+            )}
+
+            <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Fecha</label>
+            <input className="input stagger-item" type="date" value={date}
+                min={eligibility?.minDate || todayPeru}
+                max={eligibility?.maxDate || undefined}
+                onChange={e => setDate(e.target.value)} style={{ marginBottom: 8 }} />
+            {dateBlocked && (
+                <div className="badge badge-danger stagger-item" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>
+                    🚫 Esta fecha está bloqueada por sanción o cooldown
+                </div>
+            )}
             <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Horario</label>
             {date === todayPeru && (
                 <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8 }}>
@@ -536,10 +702,13 @@ function BookingPage() {
                     <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📅 {date}</p>
                     <p style={{ fontSize: 13, color: 'var(--text-2)' }}>🕐 {slot}</p>
                     <p style={{ fontSize: 13, color: 'var(--accent)', marginTop: 4 }}>+{amenity.points_reward || 10} puntos</p>
+                    <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6, fontFamily: 'monospace' }}>
+                        Recibirás un código correlativo C1-Rxxxx al confirmar.
+                    </p>
                 </div>
             )}
-            <button className="btn btn-primary btn-full" disabled={!slot || loading} onClick={handleBook}>
-                {loading ? 'Reservando...' : 'Confirmar Reserva'}
+            <button className="btn btn-primary btn-full" disabled={!slot || loading || dateBlocked} onClick={handleBook}>
+                {loading ? 'Reservando…' : dateBlocked ? 'Fecha bloqueada' : 'Confirmar Reserva'}
             </button>
         </div>
     );
@@ -567,11 +736,16 @@ function MyReservationsPage() {
             </div>
             {filtered.length === 0 ? <div className="empty-state"><span className="material-symbols-outlined">event_busy</span><p>No hay reservas</p></div> :
                 filtered.map(r => (
-                    <div key={r.id} className="card" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div key={r.id} className="card stagger-item" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
                         <img src={r.amenity?.image_url || ''} alt="" style={{ width: 60, height: 60, borderRadius: 10, objectFit: 'cover' }} />
                         <div style={{ flex: 1 }}>
                             <h4 style={{ fontSize: 14, fontWeight: 600 }}>{r.amenity?.name}</h4>
                             <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.date} • {r.time_slot}</p>
+                            {r.code && (
+                                <p style={{ fontSize: 10, color: 'var(--primary-light)', fontFamily: 'monospace', marginTop: 2 }}>
+                                    {r.code}
+                                </p>
+                            )}
                         </div>
                         {r.status === 'ACTIVA' ? (
                             <button className="btn btn-danger btn-sm" onClick={() => cancel(r.id)}>Cancelar</button>
@@ -679,7 +853,7 @@ function CommunityPage() {
                 </div>
             </div>
             {posts.map(p => (
-                <div key={p.id} className="post-card">
+                <div key={p.id} className="post-card stagger-item">
                     <div className="post-header">
                         <div className="avatar">{p.user?.avatar_url ? <img src={p.user.avatar_url} alt="" /> : (p.user?.name?.[0] || '?')}</div>
                         <div className="post-header-info">
@@ -738,7 +912,7 @@ function LeaderboardPage() {
                 <button className={`leaderboard-tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>👥 Mi Torre</button>
             </div>
             {tab === 'towers' ? communities.map((c, i) => (
-                <div key={c.id} className="leaderboard-item">
+                <div key={c.id} className="leaderboard-item stagger-item">
                     <div className={`leaderboard-rank ${i < 3 ? `top-${i + 1}` : ''}`}>{i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</div>
                     <div className="leaderboard-info">
                         <h4>{c.name}</h4>
@@ -747,7 +921,7 @@ function LeaderboardPage() {
                     <div className="leaderboard-points">{c.total_points}</div>
                 </div>
             )) : users.map((u, i) => (
-                <div key={u.id} className="leaderboard-item">
+                <div key={u.id} className="leaderboard-item stagger-item">
                     <div className={`leaderboard-rank ${i < 3 ? `top-${i + 1}` : ''}`}>{i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</div>
                     <div className="avatar" style={{ width: 36, height: 36, fontSize: 14 }}>{u.avatar_url ? <img src={u.avatar_url} alt="" /> : u.name[0]}</div>
                     <div className="leaderboard-info" style={{ flex: 1 }}>
@@ -769,6 +943,32 @@ function ProfilePage() {
     const [editing, setEditing] = useState(false);
     const [editName, setEditName] = useState(user?.name || '');
     const [uploading, setUploading] = useState(false);
+    // Cartilla completa (PDF: DNI, celular, foto DNI)
+    const [showCartilla, setShowCartilla] = useState(false);
+    const [dni, setDni] = useState(user?.dni || '');
+    const [phone, setPhone] = useState(user?.phone || '');
+    const cartillaComplete = !!(user?.dni && user?.phone);
+
+    const saveCartilla = async () => {
+        if (!user) return;
+        // Validaciones simples cliente (defensa en profundidad)
+        if (dni && !/^[0-9]{8,12}$/.test(dni)) {
+            toast('❌ DNI debe tener 8 a 12 dígitos');
+            return;
+        }
+        if (phone && !/^[0-9+\-\s()]{7,20}$/.test(phone)) {
+            toast('❌ Celular inválido');
+            return;
+        }
+        try {
+            const updated = await api.updateUserProfile(user.id, { dni: dni || undefined, phone: phone || undefined });
+            setUser(updated);
+            setShowCartilla(false);
+            toast('✅ Datos actualizados');
+        } catch (e: any) {
+            toast('Error: ' + (e.message || 'No se pudo guardar'));
+        }
+    };
 
     useEffect(() => { if (user) api.getUserPointLogs(user.id).then(l => setLogs(l.slice(0, 10))); }, [user]);
 
@@ -830,6 +1030,36 @@ function ProfilePage() {
                 </div>
             </div>
 
+            {/* Cartilla completa (Hoja1 #3) */}
+            <div className="card" style={{ marginBottom: 16, padding: 14, border: cartillaComplete ? '1px solid var(--accent)' : '1px dashed var(--warning)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showCartilla ? 12 : 0 }}>
+                    <div>
+                        <h4 style={{ fontSize: 14, fontWeight: 700 }}>
+                            {cartillaComplete ? '✅ Cartilla completa' : '📝 Completa tu cartilla'}
+                        </h4>
+                        <p style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                            {cartillaComplete ? 'Datos verificados para reservar' : 'DNI y celular para verificación'}
+                        </p>
+                    </div>
+                    <button className="btn btn-sm btn-ghost" onClick={() => setShowCartilla(!showCartilla)}>
+                        {showCartilla ? 'Cancelar' : cartillaComplete ? 'Editar' : 'Completar'}
+                    </button>
+                </div>
+                {showCartilla && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div>
+                            <label style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4, display: 'block' }}>DNI</label>
+                            <input className="input" placeholder="12345678" value={dni} onChange={e => setDni(e.target.value)} inputMode="numeric" maxLength={12} />
+                        </div>
+                        <div>
+                            <label style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4, display: 'block' }}>Celular</label>
+                            <input className="input" placeholder="+51 999 999 999" value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" maxLength={20} />
+                        </div>
+                        <button className="btn btn-primary btn-sm" style={{ gridColumn: '1 / -1' }} onClick={saveCartilla}>Guardar cartilla</button>
+                    </div>
+                )}
+            </div>
+
             <div className="section-title" style={{ fontSize: 16 }}>Historial de Puntos</div>
             {logs.length === 0 ? <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Sin actividad aún</p> :
                 logs.map(l => (
@@ -854,10 +1084,14 @@ function JoinCommunityPage() {
     const [selected, setSelected] = useState('');
     const [tower, setTower] = useState('');
     const [unit, setUnit] = useState('');
+    const [occupiedUnits, setOccupiedUnits] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [createMode, setCreateMode] = useState(viewData?.createMode || false);
     const [newName, setNewName] = useState('');
     const [newAddress, setNewAddress] = useState('');
+    const [newDistrict, setNewDistrict] = useState('');
+    const [newProvince, setNewProvince] = useState('');
+    const [newType, setNewType] = useState<'EDIFICIO' | 'CONDOMINIO' | 'MULTIFAMILIAR'>('EDIFICIO');
     // Tower config fields (create mode)
     const [numBuildings, setNumBuildings] = useState(1);
     const [numFloors, setNumFloors] = useState(10);
@@ -868,7 +1102,19 @@ function JoinCommunityPage() {
     // Auto-generate apartment number: floor*100 + room
     const adminApartment = String(adminFloor * 100 + adminRoom);
 
+    // Comunidad seleccionada (para mostrar estructura)
+    const selectedCommunity = communities.find(c => c.id === selected);
+
     useEffect(() => { api.getCommunities().then(setCommunities); }, []);
+
+    // Al seleccionar comunidad, carga dptos ocupados (anti-duplicado)
+    useEffect(() => {
+        if (!selected) { setOccupiedUnits([]); return; }
+        api.getCommunityUsers(selected).then(users => {
+            setOccupiedUnits(users.map(u => u.apartment).filter(Boolean) as string[]);
+        });
+        setUnit('');
+    }, [selected]);
 
     const submitJoin = async () => {
         if (!selected || !user) return;
@@ -888,8 +1134,10 @@ function JoinCommunityPage() {
             const community = await api.createCommunity({
                 name: newName.trim(),
                 address: newAddress.trim(),
+                district: newDistrict.trim() || undefined,
+                province: newProvince.trim() || undefined,
+                community_type: newType,
                 admin_email: user.email,
-                // @ts-ignore - extra fields: sent to Supabase directly
                 num_buildings: numBuildings,
                 total_floors: numFloors,
                 rooms_per_floor: roomsPerFloor,
@@ -918,29 +1166,96 @@ function JoinCommunityPage() {
             </div>
             {!createMode ? (
                 <>
-                    <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Unirme a torre existente</h3>
-                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Torre / Comunidad</label>
-                    <select className="input" value={selected} onChange={e => setSelected(e.target.value)} style={{ marginBottom: 12 }}>
-                        <option value="">Seleccionar torre...</option>
-                        {communities.map(c => <option key={c.id} value={c.id}>{c.name} — {c.address || ''}</option>)}
+                    <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }} className="stagger-item">Unirme a torre existente</h3>
+                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Comunidad</label>
+                    <select className="input stagger-item" value={selected} onChange={e => setSelected(e.target.value)} style={{ marginBottom: 12 }}>
+                        <option value="">Selecciona una comunidad activa…</option>
+                        {communities.filter(c => c.is_active !== false).map(c => (
+                            <option key={c.id} value={c.id}>{c.name} — {communityTypeLabel(c.community_type)} · {c.district || c.address || ''}</option>
+                        ))}
                     </select>
-                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Bloque / Torre</label>
-                    <input className="input" placeholder="Ej: Torre A" value={tower} onChange={e => setTower(e.target.value)} style={{ marginBottom: 12 }} />
-                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Departamento</label>
-                    <input className="input" placeholder="Ej: 205" value={unit} onChange={e => setUnit(e.target.value)} style={{ marginBottom: 16 }} />
-                    <button className="btn btn-primary btn-full" onClick={submitJoin} disabled={!selected || loading}>
-                        {loading ? 'Enviando...' : 'Enviar Solicitud'}
+
+                    {selectedCommunity && (
+                        <div className="card stagger-item" style={{ marginBottom: 12, padding: 12, background: 'var(--bg-2)' }}>
+                            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 6 }}>
+                                🏢 {selectedCommunity.total_floors} pisos × {selectedCommunity.rooms_per_floor} dptos =
+                                {' '}<strong>{selectedCommunity.total_floors * selectedCommunity.rooms_per_floor} unidades</strong>
+                            </p>
+                            {occupiedUnits.length > 0 && (
+                                <p style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                                    {occupiedUnits.length} departamentos ya tienen vecino registrado.
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Bloque / Torre (si aplica)</label>
+                    <input className="input stagger-item" placeholder="Ej: Torre A" value={tower} onChange={e => setTower(e.target.value)} style={{ marginBottom: 12 }} />
+
+                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Departamento (selecciona uno)</label>
+                    <select
+                        className="input stagger-item"
+                        value={unit}
+                        disabled={!selectedCommunity}
+                        onChange={e => setUnit(e.target.value)}
+                        style={{ marginBottom: 16 }}>
+                        <option value="">{selectedCommunity ? 'Selecciona departamento…' : 'Primero selecciona la comunidad'}</option>
+                        {selectedCommunity && generateStructure(selectedCommunity.total_floors, selectedCommunity.rooms_per_floor).map(f => (
+                            <optgroup key={f.floor} label={`Piso ${f.floor}`}>
+                                {f.apartments.map(a => {
+                                    const occupied = occupiedUnits.includes(a);
+                                    return (
+                                        <option key={a} value={a} disabled={occupied}>
+                                            {a}{occupied ? ' · 🔒 ocupado' : ' · libre'}
+                                        </option>
+                                    );
+                                })}
+                            </optgroup>
+                        ))}
+                    </select>
+
+                    <button className="btn btn-primary btn-full stagger-item" onClick={submitJoin} disabled={!selected || !unit || loading}>
+                        {loading ? 'Enviando…' : '📨 Enviar solicitud'}
                     </button>
-                    <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 12, textAlign: 'center' }}>El admin de la torre debe aprobar tu solicitud.</p>
+                    <p className="stagger-item" style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 12, textAlign: 'center' }}>
+                        Recibirás un código <strong>C1-Sxxxx</strong> y el admin gestionará tu solicitud.
+                    </p>
                 </>
             ) : (
                 <>
-                    <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Crear torre nueva</h3>
-                    <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16 }}>Serás el <strong>administrador</strong> de esta torre.</p>
-                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Nombre de la torre</label>
-                    <input className="input" placeholder="Ej: Torre Pedregal" value={newName} onChange={e => setNewName(e.target.value)} style={{ marginBottom: 12 }} />
-                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Dirección</label>
-                    <input className="input" placeholder="Ej: Av. Principal #123" value={newAddress} onChange={e => setNewAddress(e.target.value)} style={{ marginBottom: 12 }} />
+                    <h3 className="stagger-item" style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Crear comunidad nueva</h3>
+                    <p className="stagger-item" style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16 }}>Serás el <strong>administrador</strong> único de esta comunidad.</p>
+
+                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tipo</label>
+                    <div className="stagger-item" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
+                        {[
+                            { value: 'EDIFICIO' as const, label: '🏢 Edificio' },
+                            { value: 'CONDOMINIO' as const, label: '🏘️ Condominio' },
+                            { value: 'MULTIFAMILIAR' as const, label: '🏠 Multifamiliar' },
+                        ].map(t => (
+                            <button key={t.value} type="button"
+                                className={`btn btn-sm ${newType === t.value ? 'btn-primary' : 'btn-ghost'}`}
+                                style={{ fontSize: 12, padding: '8px 4px' }}
+                                onClick={() => setNewType(t.value)}>{t.label}</button>
+                        ))}
+                    </div>
+
+                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Nombre</label>
+                    <input className="input stagger-item" placeholder="Ej: Jardines de Sta Beatriz" value={newName} onChange={e => setNewName(e.target.value)} style={{ marginBottom: 12 }} />
+
+                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Dirección</label>
+                    <input className="input stagger-item" placeholder="Ej: Av. Principal #123" value={newAddress} onChange={e => setNewAddress(e.target.value)} style={{ marginBottom: 12 }} />
+
+                    <div className="stagger-item" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                        <div>
+                            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Distrito</label>
+                            <input className="input" placeholder="Ej: Cercado de Lima" value={newDistrict} onChange={e => setNewDistrict(e.target.value)} />
+                        </div>
+                        <div>
+                            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Provincia</label>
+                            <input className="input" placeholder="Ej: Lima" value={newProvince} onChange={e => setNewProvince(e.target.value)} />
+                        </div>
+                    </div>
 
                     {/* Tower structure config */}
                     <div style={{ background: 'var(--bg-3)', borderRadius: 12, padding: 14, marginBottom: 12 }}>
@@ -1002,7 +1317,7 @@ function JoinCommunityPage() {
 // ─── AdminPage ───
 function AdminPage() {
     const { user, go, toast } = useApp();
-    const [view, setView] = useState<'menu' | 'users' | 'audit' | 'requests' | 'analytics' | 'spaces'>('menu');
+    const [view, setView] = useState<'menu' | 'users' | 'audit' | 'requests' | 'analytics' | 'spaces' | 'rules'>('menu');
     const [allUsers, setAllUsers] = useState<User[]>([]);
     const [reservations, setReservations] = useState<Reservation[]>([]);
     const [requests, setRequests] = useState<any[]>([]);
@@ -1156,6 +1471,7 @@ function AdminPage() {
             { icon: 'people', title: 'Usuarios', desc: 'Gestionar vecinos', v: 'users' },
             { icon: 'fact_check', title: 'Auditoría', desc: 'Calificar reservas', v: 'audit' },
             { icon: 'mail', title: 'Solicitudes', desc: 'Aprobar ingresos', v: 'requests' },
+            { icon: 'gavel', title: 'Reglas', desc: 'Sanciones y restricciones', v: 'rules' },
             { icon: 'analytics', title: 'Analytics', desc: 'Dashboard', v: 'analytics' }
             ].map(item => (
                 <div key={item.v} className="admin-card" onClick={() => load(item.v)}>
@@ -1167,6 +1483,19 @@ function AdminPage() {
             <button className="btn btn-ghost btn-full" style={{ marginTop: 16 }} onClick={() => go('home')}>Volver al inicio</button>
         </div>
     );
+
+    // Reglas (sanciones + restricciones) — componente externo
+    if (view === 'rules' && user?.community_id) {
+        return (
+            <SanctionsPage
+                user={user}
+                communityFloors={user.community?.total_floors || 10}
+                communityRooms={user.community?.rooms_per_floor || 4}
+                onBack={() => setView('menu')}
+                onToast={toast}
+            />
+        );
+    }
 
     return (
         <div className="fade-in">
@@ -1325,9 +1654,16 @@ function AdminPage() {
                 <h2 className="section-title">Solicitudes Pendientes</h2>
                 {requests.length === 0 ? <p style={{ color: 'var(--text-3)' }}>No hay solicitudes</p> :
                     requests.map(r => (
-                        <div key={r.id} className="card" style={{ marginBottom: 8 }}>
-                            <h4 style={{ fontSize: 14 }}>{r.user_name}</h4>
-                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.user_email} • {r.tower} {r.unit}</p>
+                        <div key={r.id} className="card stagger-item" style={{ marginBottom: 8 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                <h4 style={{ fontSize: 14 }}>{r.user_name}</h4>
+                                {r.ticket_code && (
+                                    <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--primary-light)' }}>
+                                        {r.ticket_code}
+                                    </span>
+                                )}
+                            </div>
+                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.user_email} • {r.tower || ''} {r.unit ? `Dpto ${r.unit}` : ''}</p>
                             {r.tower && towerUserCounts[r.tower] !== undefined && (
                                 <p style={{ fontSize: 11, color: 'var(--primary-light)', marginTop: 2 }}>
                                     🏢 {towerUserCounts[r.tower]} vecino{towerUserCounts[r.tower] !== 1 ? 's' : ''} ya en {r.tower}

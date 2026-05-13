@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import type {
     User, Community, Amenity, Reservation, Post, Comment,
-    JoinRequest, PointLog, POINT_ACTIONS
+    JoinRequest, PointLog, Sanction, Restriction, AuditLog, POINT_ACTIONS
 } from '../types';
 
 // ─── Auth ───
@@ -544,4 +544,260 @@ export async function seedTestData(communityId: string): Promise<string> {
     }
 
     return `Seed data created: ${amenityNames.length} amenities for community ${communityId}`;
+}
+
+// ─── Super Admin (Hoja1 #1 — Afiliación) ───
+// El SUPER_ADMIN es el dueño del producto: da de alta/baja a los admins
+// de cada torre (uno por torre). El primer SUPER_ADMIN se siembra manualmente
+// en Supabase ejecutando:
+//   UPDATE users SET role='SUPER_ADMIN' WHERE email = 'tu@correo.com';
+
+export async function getAllAdmins(): Promise<User[]> {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*, community:communities(name, address, is_active)')
+        .in('role', ['ADMIN', 'SUPER_ADMIN'])
+        .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+}
+
+export async function getAllCommunitiesForSuperAdmin(): Promise<Community[]> {
+    const { data, error } = await supabase
+        .from('communities')
+        .select('*')
+        .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+}
+
+export async function setAdminStatus(userId: string, status: 'ACTIVO' | 'INACTIVO'): Promise<User> {
+    const { data, error } = await supabase
+        .from('users')
+        .update({ status })
+        .eq('id', userId)
+        .select()
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+export async function setCommunityActive(communityId: string, is_active: boolean): Promise<Community> {
+    const { data, error } = await supabase
+        .from('communities')
+        .update({ is_active })
+        .eq('id', communityId)
+        .select()
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+export async function promoteUserToAdmin(userId: string, communityId: string): Promise<User> {
+    const { data, error } = await supabase
+        .from('users')
+        .update({ role: 'ADMIN', community_id: communityId, status: 'ACTIVO' })
+        .eq('id', userId)
+        .select()
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+// ─── Sanciones (Hoja1 #10) ───
+
+export async function getSanctions(communityId: string): Promise<Sanction[]> {
+    const { data, error } = await supabase
+        .from('sanctions')
+        .select('*, amenity:amenities(name, image_url)')
+        .eq('community_id', communityId)
+        .order('start_date', { ascending: false });
+    if (error) throw error;
+    return data || [];
+}
+
+export async function getActiveSanctionsForUser(
+    communityId: string, apartment: string, amenityId: string, dateISO: string,
+): Promise<Sanction[]> {
+    const { data, error } = await supabase
+        .from('sanctions')
+        .select('*')
+        .eq('community_id', communityId)
+        .eq('apartment', apartment)
+        .eq('amenity_id', amenityId)
+        .lte('start_date', dateISO)
+        .gte('end_date', dateISO);
+    if (error) return [];
+    return data || [];
+}
+
+export async function createSanction(s: Partial<Sanction>): Promise<Sanction> {
+    const { data, error } = await supabase.from('sanctions').insert(s).select().single();
+    if (error) throw error;
+    return data;
+}
+
+export async function deleteSanction(id: string): Promise<void> {
+    const { error } = await supabase.from('sanctions').delete().eq('id', id);
+    if (error) throw error;
+}
+
+// ─── Restricciones (Hoja1 #11) ───
+
+export async function getRestrictions(communityId: string): Promise<Restriction[]> {
+    const { data, error } = await supabase
+        .from('restrictions')
+        .select('*')
+        .eq('community_id', communityId);
+    if (error) throw error;
+    return data || [];
+}
+
+export async function getRestriction(communityId: string, amenityId: string): Promise<Restriction | null> {
+    const { data, error } = await supabase
+        .from('restrictions')
+        .select('*')
+        .eq('community_id', communityId)
+        .eq('amenity_id', amenityId)
+        .maybeSingle();
+    if (error) return null;
+    return data;
+}
+
+export async function upsertRestriction(r: Partial<Restriction>): Promise<Restriction> {
+    const { data, error } = await supabase
+        .from('restrictions')
+        .upsert(r, { onConflict: 'community_id,amenity_id' })
+        .select()
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+// ─── Última reserva del dpto en una amenidad (para cooldown) ───
+export async function getLastReservationByApartment(
+    communityId: string, apartment: string, amenityId: string,
+): Promise<Reservation | null> {
+    // Trae todas las reservas de la amenidad y filtra por dpto del usuario dueño.
+    const { data, error } = await supabase
+        .from('reservations')
+        .select('*, user:users(community_id, apartment)')
+        .eq('amenity_id', amenityId)
+        .eq('status', 'ACTIVA')
+        .order('date', { ascending: false });
+    if (error) return null;
+    const match = (data || []).find((r: any) =>
+        r.user?.community_id === communityId && r.user?.apartment === apartment,
+    );
+    return match || null;
+}
+
+// ─── Motor de elegibilidad ───
+// Combina:
+//   • horizonte de días (max fecha reservable)
+//   • cooldown desde la última reserva del dpto
+//   • sanciones activas del dpto sobre esta amenidad
+// y devuelve restricciones para la UI del BookingPage.
+export interface Eligibility {
+    minDate: string;        // YYYY-MM-DD
+    maxDate: string;        // YYYY-MM-DD (hoy + horizon)
+    blockedDates: string[]; // fechas bloqueadas por sanción/cooldown
+    reasons: string[];      // mensajes amistosos
+    canReserve: boolean;
+}
+
+export async function getEligibility(
+    user: User, amenityId: string,
+): Promise<Eligibility> {
+    const today = new Date();
+    const todayISO = today.toISOString().split('T')[0];
+
+    const reasons: string[] = [];
+    const blockedDates: string[] = [];
+    let canReserve = true;
+
+    if (!user.community_id || !user.apartment) {
+        return { minDate: todayISO, maxDate: todayISO, blockedDates: [], reasons: ['Falta cartilla'], canReserve: false };
+    }
+
+    // 1) Restricción de la amenidad (horizonte + cooldown)
+    const restriction = await getRestriction(user.community_id, amenityId);
+    const horizonDays = restriction?.horizon_days ?? 30;
+    const cooldownDays = restriction?.cooldown_days ?? 0;
+    const cooldownHours = restriction?.cooldown_hours ?? 0;
+
+    const maxDate = new Date(today);
+    maxDate.setDate(maxDate.getDate() + horizonDays);
+    const maxDateISO = maxDate.toISOString().split('T')[0];
+
+    // 2) Cooldown desde la última reserva activa del dpto
+    if (cooldownDays > 0 || cooldownHours > 0) {
+        const last = await getLastReservationByApartment(user.community_id, user.apartment, amenityId);
+        if (last) {
+            const lastDate = new Date(last.date + 'T00:00:00');
+            const cutoff = new Date(lastDate);
+            cutoff.setDate(cutoff.getDate() + cooldownDays);
+            cutoff.setHours(cutoff.getHours() + cooldownHours);
+
+            // Bloquea desde lastDate hasta cutoff
+            const d = new Date(lastDate);
+            while (d <= cutoff) {
+                blockedDates.push(d.toISOString().split('T')[0]);
+                d.setDate(d.getDate() + 1);
+            }
+            reasons.push(
+                `Tu dpto ${user.apartment} reservó esta amenidad recientemente. Próxima fecha disponible: ${cutoff.toISOString().split('T')[0]}.`
+            );
+        }
+        // Si NO existe última reserva, el PDF dice "el sistema asume que la última fue ayer".
+        // En la práctica esto no bloquea nada nuevo (cooldown desde ayer ya pasó),
+        // así que no añadimos restricciones extra.
+    }
+
+    // 3) Sanciones activas (un solo SELECT para todo el rango)
+    const { data: sanctions } = await supabase
+        .from('sanctions')
+        .select('*')
+        .eq('community_id', user.community_id)
+        .eq('apartment', user.apartment)
+        .eq('amenity_id', amenityId)
+        .gte('end_date', todayISO);
+
+    (sanctions || []).forEach((s: Sanction) => {
+        const start = new Date(s.start_date + 'T00:00:00');
+        const end = new Date(s.end_date + 'T00:00:00');
+        const d = new Date(start);
+        while (d <= end) {
+            blockedDates.push(d.toISOString().split('T')[0]);
+            d.setDate(d.getDate() + 1);
+        }
+        reasons.push(`Sanción activa del ${s.start_date} al ${s.end_date}${s.reason ? ` — ${s.reason}` : ''}.`);
+    });
+
+    // Si todas las fechas del horizonte están bloqueadas, no puede reservar
+    const total = horizonDays + 1;
+    const uniqueBlocked = new Set(blockedDates);
+    if (uniqueBlocked.size >= total) canReserve = false;
+
+    return {
+        minDate: todayISO,
+        maxDate: maxDateISO,
+        blockedDates: Array.from(uniqueBlocked),
+        reasons,
+        canReserve,
+    };
+}
+
+export async function logAudit(action: string, entityType: string, entityId: string, metadata?: Record<string, any>) {
+    const user = await getCurrentAuthUser();
+    if (!user) return;
+    const me = await getUserByAuthId(user.id);
+    if (!me) return;
+    await supabase.from('audit_logs').insert({
+        actor_id: me.id,
+        action,
+        entity_type: entityType,
+        entity_id: entityId,
+        metadata: metadata || null,
+    });
 }

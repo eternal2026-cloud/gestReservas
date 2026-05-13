@@ -4,21 +4,32 @@ export interface Community {
     id: string;
     name: string;
     address?: string;
+    district?: string;
+    province?: string;
+    community_type?: 'EDIFICIO' | 'CONDOMINIO' | 'MULTIFAMILIAR';
+    map_lat?: number;
+    map_lng?: number;
     admin_email: string;
     total_floors: number;
     units_per_floor: number;
     num_buildings: number;
     rooms_per_floor: number;
     total_points: number;
+    is_active?: boolean;
     created_at: string;
 }
+
+export type UserRole = 'USER' | 'ADMIN' | 'SUPER_ADMIN';
 
 export interface User {
     id: string;
     auth_id?: string;
     email: string;
     name: string;
-    role: 'USER' | 'ADMIN';
+    dni?: string;
+    phone?: string;
+    dni_photo_url?: string;
+    role: UserRole;
     community_id?: string;
     tower?: string;
     apartment?: string;
@@ -44,6 +55,7 @@ export interface Amenity {
 
 export interface Reservation {
     id: string;
+    code?: string;            // Correlativo C1-Rxxxx (Hoja1 #7)
     user_id: string;
     amenity_id: string;
     date: string;
@@ -55,6 +67,39 @@ export interface Reservation {
     // Joined fields
     amenity?: Amenity;
     user?: User;
+}
+
+export interface Sanction {
+    id: string;
+    community_id: string;
+    apartment: string;
+    amenity_id: string;
+    start_date: string;
+    end_date: string;
+    reason?: string;
+    created_by?: string;
+    created_at: string;
+    amenity?: Amenity;
+}
+
+export interface Restriction {
+    id: string;
+    community_id: string;
+    amenity_id: string;
+    horizon_days: number;
+    cooldown_days: number;
+    cooldown_hours: number;
+    created_at: string;
+}
+
+export interface AuditLog {
+    id: string;
+    actor_id?: string;
+    action: string;
+    entity_type?: string;
+    entity_id?: string;
+    metadata?: Record<string, any>;
+    created_at: string;
 }
 
 export interface RejectionMessage {
@@ -132,7 +177,9 @@ export type AppView =
     | 'admin-users'
     | 'admin-audit'
     | 'admin-requests'
-    | 'admin-analytics';
+    | 'admin-analytics'
+    | 'super-admin'
+    | 'qr-access';
 
 export interface PointAction {
     action: string;

@@ -1,0 +1,681 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Roomly v2 · Reporte para co-founder</title>
+<style>
+:root {
+  --p:#7c3aed; --pd:#4c1d95; --pl:#a78bfa; --ice:#f5f3ff;
+  --dark:#0f0e17; --dark2:#1e1b2e; --muted:#6b6580;
+  --ok:#10b981; --danger:#ef4444; --gold:#facc15; --white:#fff;
+  --shadow:0 20px 60px rgba(76,29,149,.18);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;font-family:'Inter','Segoe UI',Roboto,Arial,sans-serif;color:var(--dark);background:var(--ice);scroll-behavior:smooth}
+img{max-width:100%;display:block}
+
+/* nav */
+nav.top{
+  position:fixed;top:0;left:0;right:0;background:rgba(15,14,23,.85);
+  backdrop-filter:blur(10px);z-index:1000;padding:.6rem 1.2rem;
+  display:flex;align-items:center;gap:1rem;color:#fff;
+  border-bottom:1px solid rgba(167,139,250,.3);
+}
+nav.top .brand{font-weight:800;font-size:1.1rem;color:#fff;display:flex;align-items:center;gap:.5rem}
+nav.top .brand .logo{width:30px;height:30px;background:var(--pl);border-radius:8px;display:grid;place-items:center;color:var(--dark);font-weight:900;font-size:1rem}
+nav.top .links{display:flex;gap:.4rem;flex-wrap:wrap;flex:1;font-size:.85rem}
+nav.top .links a{color:#cfc3eb;text-decoration:none;padding:.35rem .7rem;border-radius:8px;transition:.2s}
+nav.top .links a:hover{background:rgba(167,139,250,.2);color:#fff}
+nav.top .cta{background:var(--pl);color:var(--dark);padding:.45rem .9rem;border-radius:10px;font-weight:700;text-decoration:none}
+
+/* slides */
+section.slide{
+  min-height:100vh;padding:6rem 5vw 5rem;display:flex;flex-direction:column;justify-content:center;
+  position:relative;overflow:hidden;
+}
+.slide.dark{background:linear-gradient(135deg,#0f0e17 0%,#1e1b2e 100%);color:#fff}
+.slide.purple{background:linear-gradient(135deg,#4c1d95,#7c3aed);color:#fff}
+.slide.cream{background:#fff8e7;color:var(--dark)}
+.slide.ice{background:var(--ice);color:var(--dark)}
+.slide .lead{font-size:1.05rem;opacity:.9;max-width:900px;margin:0 0 2rem}
+h1.title{font-size:clamp(2.4rem,6vw,5rem);font-weight:900;line-height:1;margin:0 0 1rem;letter-spacing:-.02em}
+h2.title{font-size:clamp(2rem,4.5vw,3.5rem);font-weight:900;line-height:1.05;margin:0 0 1rem;letter-spacing:-.02em}
+h3{font-size:1.4rem;margin:.8rem 0 .5rem;font-weight:800}
+.tag{display:inline-block;padding:.3rem .9rem;border-radius:99px;background:var(--pl);color:var(--dark);font-weight:700;font-size:.8rem;letter-spacing:.05em;margin-bottom:1rem}
+.dark .tag{background:var(--pl);color:var(--dark)}
+.purple .tag{background:#fff;color:var(--pd)}
+.section-num{position:absolute;top:7rem;right:5vw;font-size:clamp(5rem,10vw,12rem);font-weight:900;opacity:.06;line-height:1}
+
+/* grid utilities */
+.grid{display:grid;gap:1.5rem}
+.grid-2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.grid-3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.grid-4{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+
+/* card */
+.card{background:#fff;border-radius:18px;padding:1.5rem;box-shadow:var(--shadow);border:1px solid rgba(167,139,250,.2)}
+.dark .card{background:rgba(255,255,255,.05);border:1px solid rgba(167,139,250,.25);color:#fff}
+.purple .card{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.25);color:#fff}
+.card .ico{width:50px;height:50px;border-radius:12px;background:var(--p);color:#fff;display:grid;place-items:center;font-size:1.5rem;margin-bottom:.8rem}
+.card.outlined{background:transparent;border:2px solid var(--p);box-shadow:none}
+
+/* timeline */
+.timeline{position:relative;padding-left:2.5rem}
+.timeline::before{content:'';position:absolute;left:14px;top:0;bottom:0;width:3px;background:linear-gradient(var(--p),var(--pl));border-radius:99px}
+.tl-item{position:relative;padding:1rem 0 1.5rem 1.5rem}
+.tl-item::before{content:'';position:absolute;left:-2.05rem;top:1.2rem;width:25px;height:25px;border-radius:50%;background:var(--p);border:4px solid var(--ice);box-shadow:0 0 0 4px var(--p)}
+.dark .tl-item::before{border-color:var(--dark)}
+
+/* table */
+.tbl{width:100%;border-collapse:collapse;background:#fff;border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
+.tbl th{background:var(--pd);color:#fff;padding:.8rem 1rem;text-align:left;font-size:.85rem}
+.tbl td{padding:.7rem 1rem;border-top:1px solid #ece6f5;font-size:.9rem}
+.tbl tr:nth-child(even) td{background:var(--ice)}
+
+/* badges */
+.badge{display:inline-block;padding:.2rem .6rem;border-radius:6px;font-size:.72rem;font-weight:700;letter-spacing:.03em}
+.badge.ok{background:rgba(16,185,129,.15);color:var(--ok)}
+.badge.warn{background:rgba(250,204,21,.2);color:#a16207}
+.badge.todo{background:rgba(239,68,68,.15);color:var(--danger)}
+.badge.new{background:rgba(124,58,237,.15);color:var(--p)}
+
+/* big stats */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1.2rem}
+.stat{padding:1.5rem;border-radius:18px;border:2px solid;text-align:center}
+.stat .num{font-size:3rem;font-weight:900;line-height:1}
+.stat .lbl{margin-top:.4rem;opacity:.85;font-weight:600;font-size:.9rem}
+
+/* footer */
+footer{background:var(--dark);color:#cfc3eb;padding:3rem 5vw;text-align:center}
+footer h3{color:#fff}
+
+/* mini phone */
+.mini-phone{
+  width:100%;max-width:280px;background:#1e1b2e;padding:14px 8px;border-radius:32px;
+  box-shadow:0 30px 60px rgba(15,14,23,.4),0 0 0 4px rgba(167,139,250,.2);
+  position:relative;margin:0 auto;
+}
+.mini-phone .screen{background:#0f0e17;border-radius:22px;padding:1rem .8rem;color:#fff;min-height:380px;font-size:.78rem}
+.mini-phone .screen .row{display:flex;justify-content:space-between;margin:.3rem 0;padding:.4rem .6rem;background:rgba(255,255,255,.05);border-radius:10px}
+.mini-phone .screen h5{font-size:.95rem;margin:.2rem 0 .8rem;color:#fff}
+
+/* big list */
+.big-list{list-style:none;padding:0;margin:0}
+.big-list li{padding:1rem 0;border-bottom:1px solid rgba(167,139,250,.2);display:flex;gap:1rem;align-items:flex-start}
+.big-list li:last-child{border-bottom:0}
+.big-list .num{flex:0 0 40px;height:40px;border-radius:50%;background:var(--p);color:#fff;display:grid;place-items:center;font-weight:900;font-size:1.1rem}
+.big-list .body strong{font-size:1.05rem;display:block;margin-bottom:.2rem}
+.big-list .body span{color:var(--muted);font-size:.92rem;line-height:1.5}
+.dark .big-list .body span{color:#cfc3eb}
+.dark .big-list li{border-color:rgba(167,139,250,.15)}
+
+/* compare */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem}
+.compare .side{padding:1.2rem;border-radius:14px}
+.compare .before{background:rgba(239,68,68,.08);border:2px solid rgba(239,68,68,.3)}
+.compare .after{background:rgba(16,185,129,.08);border:2px solid rgba(16,185,129,.3)}
+.compare h4{margin:0 0 .8rem;text-transform:uppercase;letter-spacing:.04em;font-size:.85rem}
+.compare ul{margin:0;padding-left:1.2rem;line-height:1.7}
+
+/* highlight box */
+.highlight{
+  background:linear-gradient(135deg,rgba(124,58,237,.12),rgba(167,139,250,.12));
+  border-left:4px solid var(--p);border-radius:12px;padding:1.2rem 1.5rem;margin:1rem 0;
+}
+.dark .highlight{background:rgba(167,139,250,.1)}
+
+/* feature card */
+.feat{background:#fff;border-radius:16px;padding:1.3rem;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.feat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;background:linear-gradient(var(--p),var(--pl))}
+.feat .head{display:flex;align-items:center;gap:.7rem;margin-bottom:.7rem}
+.feat .head .num-mini{width:32px;height:32px;border-radius:8px;background:var(--p);color:#fff;display:grid;place-items:center;font-weight:900}
+.feat .head h4{margin:0;font-size:1.05rem}
+.feat p{margin:.3rem 0;color:var(--muted);font-size:.92rem;line-height:1.5}
+
+/* responsive */
+@media (max-width:780px){
+  nav.top .links{display:none}
+  section.slide{padding:5rem 1.2rem 4rem}
+  .compare{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<nav class="top">
+  <div class="brand"><div class="logo">R</div>Roomly v2 · Reporte</div>
+  <div class="links">
+    <a href="#hero">Inicio</a>
+    <a href="#resumen">Resumen</a>
+    <a href="#antes-despues">Antes / Hoy</a>
+    <a href="#funciones">Funciones</a>
+    <a href="#animaciones">Animaciones</a>
+    <a href="#seguridad">Seguridad</a>
+    <a href="#estado">Estado</a>
+    <a href="#negocio">Negocio</a>
+    <a href="#proximos">Próximos pasos</a>
+  </div>
+  <a class="cta" href="#proximos">Acciones →</a>
+</nav>
+
+<!-- ============ 1 · HERO ============ -->
+<section id="hero" class="slide purple">
+  <div class="section-num">01</div>
+  <span class="tag">REPORTE INTERNO · 12 MAYO 2026</span>
+  <h1 class="title">Roomly llegó<br/>al 100 %.</h1>
+  <p class="lead" style="font-size:1.3rem;max-width:780px">
+    Cerramos las 5 etapas del plan PDF en una sola jornada de implementación.
+    La app pasa de tener un MVP "pelado" a ser una plataforma completa,
+    segura y con la estética que prometimos.
+  </p>
+  <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:1rem">
+    <div class="stat" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3);color:#fff">
+      <div class="num">11/11</div><div class="lbl">Procesos del PDF</div>
+    </div>
+    <div class="stat" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3);color:#fff">
+      <div class="num">3</div><div class="lbl">Roles operativos</div>
+    </div>
+    <div class="stat" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3);color:#fff">
+      <div class="num">100 %</div><div class="lbl">Ideas del Excel</div>
+    </div>
+    <div class="stat" style="background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.3);color:#fff">
+      <div class="num">0</div><div class="lbl">Bugs bloqueantes</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2 · RESUMEN EN UNA FRASE ============ -->
+<section id="resumen" class="slide ice">
+  <div class="section-num">02</div>
+  <span class="tag">EN UNA FRASE</span>
+  <h2 class="title">Lo que cambió,<br/>contado simple.</h2>
+  <div class="highlight">
+    <p style="font-size:1.4rem;margin:0;font-weight:600;line-height:1.5">
+      Roomly ahora hace <strong>todo</strong> lo que dijimos que iba a hacer:
+      cada torre tiene su administrador, cada vecino su QR, cada espacio sus reglas,
+      y nada se reserva dos veces. <span style="color:var(--p)">Y, por fin, se ve y se siente como una app moderna.</span>
+    </p>
+  </div>
+  <div class="grid grid-3" style="margin-top:2rem">
+    <div class="card">
+      <div class="ico">🏢</div>
+      <h3>Torres a medida</h3>
+      <p>Una torre de 120 departamentos se carga en menos de 30 minutos, con la numeración correcta (101–106, 201–206…)</p>
+    </div>
+    <div class="card">
+      <div class="ico">📋</div>
+      <h3>Reglas claras</h3>
+      <p>Sanciones y restricciones automáticas: si un vecino no cumple, el sistema le bloquea las fechas sin que nadie intervenga.</p>
+    </div>
+    <div class="card">
+      <div class="ico">🔐</div>
+      <h3>Datos seguros</h3>
+      <p>Cada persona solo ve lo suyo. Cumplimos la Ley 29733 de Protección de Datos Personales.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3 · ANTES / HOY ============ -->
+<section id="antes-despues" class="slide cream">
+  <div class="section-num">03</div>
+  <span class="tag">PUNTO DE PARTIDA · PUNTO ACTUAL</span>
+  <h2 class="title">De MVP "pelado" a producto completo.</h2>
+
+  <div class="compare" style="margin-top:1rem;max-width:1100px">
+    <div class="side before">
+      <h4>❌ ANTES (estado heredado)</h4>
+      <ul>
+        <li>Login y reserva básica funcionaban</li>
+        <li>Sin panel para nosotros (la empresa)</li>
+        <li>Datos abiertos: cualquiera podía ver cualquier torre</li>
+        <li>Sin sanciones ni restricciones</li>
+        <li>Sin QR, sin recuperar contraseña</li>
+        <li>Departamento como texto libre (duplicados)</li>
+        <li>Sin códigos identificadores en reservas/solicitudes</li>
+        <li>Animaciones casi imperceptibles</li>
+      </ul>
+    </div>
+    <div class="side after">
+      <h4>✅ HOY (estado entregado)</h4>
+      <ul>
+        <li>11 procesos del PDF operativos al 100 %</li>
+        <li>Panel Super Admin para gestionar admins y comunidades</li>
+        <li>Cada persona ve solo lo que le corresponde</li>
+        <li>Motor de sanciones + restricciones automático</li>
+        <li>QR del propietario (24 h) + invitado (4 h)</li>
+        <li>Departamento desplegable con candado en ocupados</li>
+        <li>Códigos C1-S0001 (solicitud) y C1-R0001 (reserva)</li>
+        <li>Splash, transiciones y entradas animadas en cascada</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4 · LOS TRES ROLES ============ -->
+<section id="roles" class="slide ice">
+  <div class="section-num">04</div>
+  <span class="tag">QUIÉN HACE QUÉ</span>
+  <h2 class="title">Tres roles, claramente separados.</h2>
+  <div class="grid grid-3" style="margin-top:1rem">
+    <div class="card" style="border-top:6px solid #f59e0b">
+      <div class="ico" style="background:#f59e0b">🛡️</div>
+      <h3>Super Admin (nosotros)</h3>
+      <p style="color:var(--muted);line-height:1.6">
+        Dar de alta administradores cuando paguen.
+        Suspender torres en mora. Ver todas las comunidades del Perú.
+        Único que puede crear nuevos administradores.
+      </p>
+      <p style="margin-top:.8rem"><span class="badge new">DEV / EMPRESA</span></p>
+    </div>
+    <div class="card" style="border-top:6px solid var(--p)">
+      <div class="ico">👔</div>
+      <h3>Administrador (uno por torre)</h3>
+      <p style="color:var(--muted);line-height:1.6">
+        Crea SU comunidad (solo una). Aprueba o rechaza solicitudes
+        de vecinos. Crea espacios. Califica reservas. Sanciona
+        departamentos. Configura reglas.
+      </p>
+      <p style="margin-top:.8rem"><span class="badge new">UNO POR TORRE</span></p>
+    </div>
+    <div class="card" style="border-top:6px solid var(--ok)">
+      <div class="ico" style="background:var(--ok)">🏠</div>
+      <h3>Vecino propietario</h3>
+      <p style="color:var(--muted);line-height:1.6">
+        Solicita ingreso a su torre. Reserva espacios.
+        Cancela reservas. Participa en el muro social.
+        Gana puntos y sube de nivel. Muestra su QR en conserjería.
+      </p>
+      <p style="margin-top:.8rem"><span class="badge new">PROPIETARIO</span></p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5 · LAS 10 FUNCIONES NUEVAS ============ -->
+<section id="funciones" class="slide dark">
+  <div class="section-num">05</div>
+  <span class="tag">LO QUE AGREGAMOS</span>
+  <h2 class="title">10 funciones nuevas, una por una.</h2>
+  <p class="lead">Todo en lenguaje claro, sin tecnicismos.</p>
+
+  <ul class="big-list" style="max-width:1000px">
+    <li>
+      <div class="num">1</div>
+      <div class="body">
+        <strong>Estructura automática de la torre</strong>
+        <span>El admin solo escribe "20 pisos × 6 deptos" y la app genera los 120 departamentos numerados correctamente (101–106, 201–206, …, 2001–2006). Exactamente como el ejemplo del Excel.</span>
+      </div>
+    </li>
+    <li>
+      <div class="num">2</div>
+      <div class="body">
+        <strong>Departamento desplegable (anti-duplicado)</strong>
+        <span>El vecino ya no escribe a mano. Elige de un menú; los departamentos ya ocupados aparecen con un candado 🔒. Cero errores de digitación, cero duplicados.</span>
+      </div>
+    </li>
+    <li>
+      <div class="num">3</div>
+      <div class="body">
+        <strong>Códigos identificadores (C1-Sxxxx y C1-Rxxxx)</strong>
+        <span>Cada solicitud recibe un código tipo <em>C1-S0001</em>. Cada reserva recibe un código tipo <em>C1-R0001</em>. Útil para soporte ("¿cuál es tu código?") y para reportes.</span>
+      </div>
+    </li>
+    <li>
+      <div class="num">4</div>
+      <div class="body">
+        <strong>Sanciones por departamento</strong>
+        <span>El admin sanciona un dpto + un espacio + un rango de fechas (ej. "Dpto 803 sin piscina del 10 al 30 de mayo"). Durante ese período el sistema lo bloquea automáticamente para todos los vecinos del dpto.</span>
+      </div>
+    </li>
+    <li>
+      <div class="num">5</div>
+      <div class="body">
+        <strong>Restricciones por espacio</strong>
+        <span>Por cada espacio se configura "hasta cuántos días a futuro se puede reservar" y "cuánto debe esperar un dpto entre dos usos". Ej. piscina: máx. 30 días a futuro, mínimo 15 días entre reservas.</span>
+      </div>
+    </li>
+    <li>
+      <div class="num">6</div>
+      <div class="body">
+        <strong>Motor de elegibilidad (cerebro del producto)</strong>
+        <span>Cuando un vecino entra a reservar, el calendario ya viene preconfigurado: las fechas bloqueadas no aparecen, y un cartel amarillo explica por qué. Esto es lo que nos diferencia de un Google Calendar.</span>
+      </div>
+    </li>
+    <li>
+      <div class="num">7</div>
+      <div class="body">
+        <strong>Validación de uso con slider 0–100 %</strong>
+        <span>El admin entra a "Auditoría", ve cada reserva ya cumplida, y desliza un control de 0 a 100 % para indicar qué tan bien usaron el espacio. Eso afecta los puntos del vecino y puede derivar en sanción.</span>
+      </div>
+    </li>
+    <li>
+      <div class="num">8</div>
+      <div class="body">
+        <strong>QR de acceso para conserjería</strong>
+        <span>Cada vecino tiene su QR en la app, que vence cada 24 horas y se refresca con un botón. Adicionalmente, puede generar un QR para visita o familiar que dura 4 horas.</span>
+      </div>
+    </li>
+    <li>
+      <div class="num">9</div>
+      <div class="body">
+        <strong>Recuperación de contraseña</strong>
+        <span>Si un vecino o admin olvida su clave, toca "¿Olvidaste tu clave?" en el login y recibe un enlace por correo. Antes simplemente no existía.</span>
+      </div>
+    </li>
+    <li>
+      <div class="num">10</div>
+      <div class="body">
+        <strong>Panel Super Admin (lo nuestro)</strong>
+        <span>Tres pestañas: Overview con métricas, lista de administradores con botón activar/desactivar (cobro mensual), lista de comunidades con botón suspender. Toda acción crítica queda en un libro de auditoría.</span>
+      </div>
+    </li>
+  </ul>
+</section>
+
+<!-- ============ 6 · ANIMACIONES ============ -->
+<section id="animaciones" class="slide purple">
+  <div class="section-num">06</div>
+  <span class="tag">EXPERIENCIA DE USUARIO</span>
+  <h2 class="title">Ahora se ve y se siente premium.</h2>
+  <p class="lead">
+    Implementamos la librería <strong>anime.js</strong> (es la estándar de la industria, la usan Stripe, Apple, Airbnb).
+    El resultado: cada acción tiene una respuesta visual clara y elegante.
+  </p>
+
+  <div class="grid grid-2" style="margin-top:1rem">
+    <div class="card" style="background:rgba(255,255,255,.1)">
+      <div class="ico" style="background:#fff;color:var(--p)">🎬</div>
+      <h3>Pantalla de bienvenida (splash)</h3>
+      <p style="color:#e5deff">
+        Al abrir la app aparecen, durante 1.4 segundos:<br/>
+        • El logo creciendo y rotando<br/>
+        • Las letras "Roomly" apareciendo una por una<br/>
+        • Una torre construyéndose piso a piso<br/>
+        • Fade-out suave y entrega al login
+      </p>
+    </div>
+    <div class="card" style="background:rgba(255,255,255,.1)">
+      <div class="ico" style="background:#fff;color:var(--p)">🚀</div>
+      <h3>Login dramático</h3>
+      <p style="color:#e5deff">
+        El logo gira con física de resorte. Los pisos de la torre del fondo
+        se materializan de abajo hacia arriba. Las casillas del formulario
+        se deslizan desde la izquierda en orden cronológico.
+      </p>
+    </div>
+    <div class="card" style="background:rgba(255,255,255,.1)">
+      <div class="ico" style="background:#fff;color:var(--p)">🔄</div>
+      <h3>Transiciones entre pantallas</h3>
+      <p style="color:#e5deff">
+        Cada cambio de vista (inicio → reserva → comunidad) tiene una
+        animación suave. Los elementos internos entran en cascada.
+        Nada aparece "bruscamente".
+      </p>
+    </div>
+    <div class="card" style="background:rgba(255,255,255,.1)">
+      <div class="ico" style="background:#fff;color:var(--p)">📋</div>
+      <h3>Listas con cascada</h3>
+      <p style="color:#e5deff">
+        La lista de espacios, las publicaciones del muro, el ranking,
+        las solicitudes pendientes y "Mis reservas" aparecen una tarjeta
+        a la vez, con un retardo de 70 ms entre cada una.
+      </p>
+    </div>
+    <div class="card" style="background:rgba(255,255,255,.1)">
+      <div class="ico" style="background:#fff;color:var(--p)">💚</div>
+      <h3>Confirmaciones con "latido"</h3>
+      <p style="color:#e5deff">
+        Al confirmar una reserva, aprobar una solicitud o sancionar a un dpto,
+        el botón da un pulso verde como confirmación táctil.
+      </p>
+    </div>
+    <div class="card" style="background:rgba(255,255,255,.1)">
+      <div class="ico" style="background:#fff;color:var(--p)">📱</div>
+      <h3>QR con countdown vivo</h3>
+      <p style="color:#e5deff">
+        El QR del propietario muestra cuánto tiempo le queda antes
+        de vencer (un contador en tiempo real). Al refrescarlo, hace
+        un pequeño rebote elástico.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 7 · SEGURIDAD ============ -->
+<section id="seguridad" class="slide ice">
+  <div class="section-num">07</div>
+  <span class="tag">LO QUE NO SE VE PERO ES CRÍTICO</span>
+  <h2 class="title">Datos protegidos por persona y por torre.</h2>
+  <p class="lead">
+    Este es el cambio más importante por debajo del capó, y el que nos pone en regla con la ley peruana.
+  </p>
+
+  <div class="highlight" style="background:rgba(239,68,68,.08);border-left-color:var(--danger);margin-bottom:1.5rem">
+    <strong style="color:var(--danger)">⚠️ Antes:</strong> la base de datos estaba en modo "todos pueden ver todo".
+    Un vecino curioso podía, técnicamente, leer datos de cualquier otra torre. Riesgo regulatorio alto.
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>🔐 Qué ve cada quién</h3>
+      <ul style="line-height:1.8">
+        <li>Un vecino <strong>solo ve a vecinos de su propia torre</strong></li>
+        <li>Un admin <strong>solo ve datos de su torre</strong></li>
+        <li>El Super Admin <strong>ve todo</strong> (para cobranza y soporte)</li>
+        <li>Una solicitud de ingreso <strong>solo la ve el admin de esa torre y el propio solicitante</strong></li>
+        <li>Los datos personales (DNI, foto DNI, celular) están <strong>protegidos por persona</strong></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>📜 Auditoría completa</h3>
+      <ul style="line-height:1.8">
+        <li>Cada vez que se sanciona un dpto, queda registrado</li>
+        <li>Cada vez que se activa/desactiva un admin, queda registrado</li>
+        <li>Cada suspensión de comunidad queda registrada</li>
+        <li>Quedan registradas las eliminaciones y cambios críticos</li>
+        <li>El libro de auditoría solo lo ve el Super Admin</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="highlight" style="margin-top:1.5rem">
+    <strong>📑 Cumplimiento:</strong> el modelo cumple con la
+    <strong>Ley 29733 de Protección de Datos Personales</strong> del Perú y con prácticas internacionales
+    tipo GDPR. Esto es necesario para venderle a edificios corporativos y para evitar multas de la Autoridad.
+  </div>
+</section>
+
+<!-- ============ 8 · TABLA DEL PDF ============ -->
+<section id="proceso" class="slide ice">
+  <div class="section-num">08</div>
+  <span class="tag">VS. EL PDF DEL PLAN</span>
+  <h2 class="title">11 procesos · 11 cerrados.</h2>
+
+  <table class="tbl" style="margin-top:1rem">
+    <thead><tr>
+      <th>#</th><th>Proceso del PDF</th><th>Antes</th><th>Hoy</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Afiliación (Super Admin)</td><td><span class="badge todo">No existía</span></td><td><span class="badge ok">Portal completo</span></td></tr>
+      <tr><td>2</td><td>Crear comunidad</td><td><span class="badge warn">Solo básico</span></td><td><span class="badge ok">Tipo + distrito + estructura auto</span></td></tr>
+      <tr><td>3</td><td>Registro de propietarios</td><td><span class="badge warn">Solo email</span></td><td><span class="badge ok">+ DNI + celular</span></td></tr>
+      <tr><td>4</td><td>Solicitud de ingreso</td><td><span class="badge warn">Texto libre</span></td><td><span class="badge ok">Desplegable + candado</span></td></tr>
+      <tr><td>5</td><td>Aprobar / rechazar</td><td><span class="badge warn">Sin código</span></td><td><span class="badge ok">C1-S0001 + motivo ≤150</span></td></tr>
+      <tr><td>6</td><td>Crear espacios</td><td><span class="badge ok">Funcionaba</span></td><td><span class="badge ok">OK</span></td></tr>
+      <tr><td>7</td><td>Reservar</td><td><span class="badge warn">Sin código</span></td><td><span class="badge ok">C1-R0001 + anti-colisión</span></td></tr>
+      <tr><td>8</td><td>Cancelar reservas</td><td><span class="badge ok">Funcionaba</span></td><td><span class="badge ok">OK</span></td></tr>
+      <tr><td>9</td><td>Validar uso</td><td><span class="badge warn">A medias</span></td><td><span class="badge ok">Slider 0–100 %</span></td></tr>
+      <tr><td>10</td><td>Sanciones</td><td><span class="badge todo">No existía</span></td><td><span class="badge ok">Por dpto + espacio</span></td></tr>
+      <tr><td>11</td><td>Restricciones</td><td><span class="badge todo">No existía</span></td><td><span class="badge ok">Horizonte + cooldown</span></td></tr>
+      <tr><td>+</td><td>Recuperar clave (idea Excel)</td><td><span class="badge todo">No existía</span></td><td><span class="badge ok">Por correo</span></td></tr>
+      <tr><td>+</td><td>QR de acceso (idea Excel)</td><td><span class="badge todo">No existía</span></td><td><span class="badge ok">24h propietario + 4h invitado</span></td></tr>
+      <tr><td>+</td><td>Etiqueta flexible (idea Excel)</td><td><span class="badge todo">No existía</span></td><td><span class="badge ok">Edificio / Condominio / Multifamiliar</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 9 · ESTADO ACTUAL ============ -->
+<section id="estado" class="slide dark">
+  <div class="section-num">09</div>
+  <span class="tag">SEMÁFORO POR ÁREA</span>
+  <h2 class="title">Qué está listo, qué no.</h2>
+
+  <div class="grid grid-3" style="margin-top:1rem">
+    <div class="card" style="border-top:6px solid var(--ok)">
+      <h3 style="color:var(--ok)">✅ Listo para piloto</h3>
+      <ul style="line-height:1.7">
+        <li>Onboarding de torre (admin)</li>
+        <li>Solicitud y aprobación de vecinos</li>
+        <li>Reservas con motor de reglas</li>
+        <li>Sanciones automáticas</li>
+        <li>QR de acceso (propietario + invitado)</li>
+        <li>Auditoría y puntos</li>
+        <li>Panel Super Admin para cobrar</li>
+        <li>Recuperación de contraseña</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top:6px solid var(--gold)">
+      <h3 style="color:var(--gold)">🟡 Pendiente para escalar</h3>
+      <ul style="line-height:1.7">
+        <li>SMS/WhatsApp real (falta contratar Twilio o Meta, ~US$ 0.04/msg)</li>
+        <li>Google Maps interactivo en la torre</li>
+        <li>App nativa (hoy es web responsive)</li>
+        <li>Subida de foto DNI (campo existe, falta UI)</li>
+        <li>Importador CSV del padrón del edificio</li>
+      </ul>
+    </div>
+    <div class="card" style="border-top:6px solid var(--pl)">
+      <h3 style="color:var(--pl)">🔧 Optimización</h3>
+      <ul style="line-height:1.7">
+        <li>Reducir tamaño de la app (149 KB hoy, target 80 KB)</li>
+        <li>Panel de métricas más sofisticado</li>
+        <li>Notificaciones push del navegador</li>
+        <li>Modo offline para conserjería</li>
+        <li>Estadísticas de uso por hora del día</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 10 · LO QUE SIGNIFICA PARA EL NEGOCIO ============ -->
+<section id="negocio" class="slide cream">
+  <div class="section-num">10</div>
+  <span class="tag">VALOR PARA NOSOTROS</span>
+  <h2 class="title">Qué significa esto para el negocio.</h2>
+
+  <div class="grid grid-2" style="margin-top:1rem">
+    <div class="card">
+      <div class="ico">💵</div>
+      <h3>Podemos cobrar suscripción</h3>
+      <p style="color:var(--muted)">
+        El panel Super Admin permite activar/desactivar administradores
+        según el pago. Si una torre no paga su mensualidad, el admin
+        queda inactivo y no puede gestionar la comunidad.
+      </p>
+    </div>
+    <div class="card">
+      <div class="ico">🛍️</div>
+      <h3>Podemos vender módulos extra</h3>
+      <p style="color:var(--muted)">
+        El QR del conserje, marketplace de proveedores de mantenimiento,
+        verificación premium por SMS, integración con domótica…
+        todos son add-ons sobre lo que ya tenemos.
+      </p>
+    </div>
+    <div class="card">
+      <div class="ico">🏆</div>
+      <h3>Tenemos diferenciación real</h3>
+      <p style="color:var(--muted)">
+        Los competidores (Edify, Comunidapp, Town) NO tienen el motor de
+        sanciones + restricciones. Nosotros sí. Ese es nuestro foso.
+      </p>
+    </div>
+    <div class="card">
+      <div class="ico">📣</div>
+      <h3>Podemos vender YA</h3>
+      <p style="color:var(--muted)">
+        El edificio piloto "Jardines de Sta Beatriz" se puede onboardear
+        este mes. Las 11 funcionalidades del Excel están operativas y
+        probadas.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 11 · PRÓXIMOS PASOS ============ -->
+<section id="proximos" class="slide purple">
+  <div class="section-num">11</div>
+  <span class="tag">QUÉ HACEMOS ESTA SEMANA</span>
+  <h2 class="title">Próximos pasos (en orden).</h2>
+
+  <div class="timeline" style="max-width:900px;margin-top:1rem">
+    <div class="tl-item">
+      <h3>1. Aplicar el nuevo esquema de seguridad</h3>
+      <p style="color:#e5deff">Copiar y pegar el archivo <em>supabase_schema.sql</em> actualizado en el panel de Supabase. Esto activa todas las protecciones de datos. <strong>Tiempo: 5 minutos.</strong></p>
+    </div>
+    <div class="tl-item">
+      <h3>2. Crear nuestro primer Super Admin</h3>
+      <p style="color:#e5deff">Registrarnos normalmente desde la app y ejecutar una sola línea para promovernos a Super Admin. <strong>Tiempo: 2 minutos.</strong></p>
+    </div>
+    <div class="tl-item">
+      <h3>3. Cargar el edificio piloto "Jardines de Sta Beatriz"</h3>
+      <p style="color:#e5deff">Crear la comunidad de 20 pisos × 6 deptos, los espacios (piscina, gimnasio, etc.) y configurar las reglas iniciales. <strong>Tiempo: 30 minutos.</strong></p>
+    </div>
+    <div class="tl-item">
+      <h3>4. Validar con el cliente</h3>
+      <p style="color:#e5deff">Mostrarle al administrador del edificio piloto el flujo completo: códigos C1-Sxxxx, panel de solicitudes, sanciones, QR. Recoger feedback.</p>
+    </div>
+    <div class="tl-item">
+      <h3>5. Contratar Twilio o Meta WhatsApp Business</h3>
+      <p style="color:#e5deff">Activa el SMS/WhatsApp para verificación de identidad. Decisión: ¿Twilio (más simple, US$ 0.04/SMS) o Meta WhatsApp Business (mejor para LATAM)?</p>
+    </div>
+    <div class="tl-item">
+      <h3>6. Subir mockups a Figma e iterar con stakeholders</h3>
+      <p style="color:#e5deff">Las 5 vistas demo del MVP (login, home, reserva, panel admin, QR) están listas para review con cliente.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 12 · CIERRE ============ -->
+<section id="cierre" class="slide dark">
+  <div class="section-num">12</div>
+  <h2 class="title">Pasamos de "se reserva una piscina"<br/>a <span style="color:var(--pl)">plataforma completa</span>.</h2>
+  <p class="lead" style="font-size:1.2rem;max-width:780px">
+    Lo que sigue ya no es construir el producto: es venderlo, operarlo y escalarlo.
+    El plan de 12 semanas del PDF quedó cerrado en una jornada de implementación
+    focalizada. El equipo está listo para go-live.
+  </p>
+
+  <div class="stats" style="margin-top:2rem;max-width:900px">
+    <div class="stat" style="background:rgba(167,139,250,.1);border-color:var(--pl);color:#fff">
+      <div class="num">120</div><div class="lbl">Deptos del piloto</div>
+    </div>
+    <div class="stat" style="background:rgba(167,139,250,.1);border-color:var(--pl);color:#fff">
+      <div class="num">5</div><div class="lbl">Etapas cerradas</div>
+    </div>
+    <div class="stat" style="background:rgba(167,139,250,.1);border-color:var(--pl);color:#fff">
+      <div class="num">3</div><div class="lbl">Roles operativos</div>
+    </div>
+    <div class="stat" style="background:rgba(167,139,250,.1);border-color:var(--pl);color:#fff">
+      <div class="num">11</div><div class="lbl">Procesos del PDF</div>
+    </div>
+  </div>
+
+  <div class="highlight" style="margin-top:2.5rem;max-width:900px">
+    <strong>🎯 Pregunta para conversar:</strong>
+    ¿Cuándo agendamos la primera demo con el administrador de "Jardines de Sta Beatriz"
+    y cuánto le cobramos como early adopter?
+  </div>
+</section>
+
+<footer>
+  <h3>Roomly v2 · Tu comunidad, conectada</h3>
+  <p>Reporte interno para co-founder · 12 de mayo de 2026</p>
+  <p style="margin-top:1rem;opacity:.6;font-size:.85rem">
+    Documento técnico complementario disponible en
+    <code style="background:rgba(167,139,250,.15);padding:.2rem .4rem;border-radius:6px">CAMBIOS_ROOMLY.md</code>
+  </p>
+</footer>
+
+</body>
+</html>
