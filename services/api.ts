@@ -466,9 +466,15 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
     if (!file.type.startsWith('image/')) throw new Error('El archivo debe ser una imagen');
     if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar 5 MB');
 
+    // Usa el auth.uid() para que la política RLS de Storage sea trivial:
+    //   WHERE (storage.foldername(name))[1] = auth.uid()::text
+    const { data: authData } = await supabase.auth.getUser();
+    const authUid = authData?.user?.id;
+    if (!authUid) throw new Error('Sesión no válida; vuelve a iniciar sesión');
+
     const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
     // Path único por subida → evita que el navegador cachee la imagen anterior
-    const path = `${userId}/${Date.now()}.${ext}`;
+    const path = `${authUid}/${Date.now()}.${ext}`;
 
     const { error: upErr } = await supabase.storage
         .from('avatars')
@@ -481,8 +487,12 @@ export async function uploadAvatar(userId: string, file: File): Promise<string> 
     if (upErr) {
         // Errores comunes de Storage: bucket inexistente o RLS.
         const msg = upErr.message || String(upErr);
-        if (msg.toLowerCase().includes('bucket') && msg.toLowerCase().includes('not found')) {
-            throw new Error('Falta crear el bucket "avatars" en Supabase Storage');
+        const low = msg.toLowerCase();
+        if (low.includes('bucket') && low.includes('not found')) {
+            throw new Error('Falta crear el bucket "avatars" en Supabase Storage (corre supabase_storage_setup.sql)');
+        }
+        if (low.includes('row-level security') || low.includes('unauthorized') || low.includes('new row violates')) {
+            throw new Error('Permisos de Storage faltantes: corre supabase_storage_setup.sql en Supabase');
         }
         throw new Error(msg);
     }
