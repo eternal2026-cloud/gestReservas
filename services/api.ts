@@ -462,12 +462,31 @@ export async function getUserPointLogs(userId: string): Promise<PointLog[]> {
 // ─── Storage (Image Uploads) ───
 
 export async function uploadAvatar(userId: string, file: File): Promise<string> {
-    const ext = file.name.split('.').pop();
-    const path = `${userId}/avatar.${ext}`;
-    const { error } = await supabase.storage
+    if (!file) throw new Error('No se recibió archivo');
+    if (!file.type.startsWith('image/')) throw new Error('El archivo debe ser una imagen');
+    if (file.size > 5 * 1024 * 1024) throw new Error('La imagen no puede superar 5 MB');
+
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    // Path único por subida → evita que el navegador cachee la imagen anterior
+    const path = `${userId}/${Date.now()}.${ext}`;
+
+    const { error: upErr } = await supabase.storage
         .from('avatars')
-        .upload(path, file, { upsert: true });
-    if (error) throw error;
+        .upload(path, file, {
+            upsert: true,
+            cacheControl: '3600',
+            contentType: file.type,
+        });
+
+    if (upErr) {
+        // Errores comunes de Storage: bucket inexistente o RLS.
+        const msg = upErr.message || String(upErr);
+        if (msg.toLowerCase().includes('bucket') && msg.toLowerCase().includes('not found')) {
+            throw new Error('Falta crear el bucket "avatars" en Supabase Storage');
+        }
+        throw new Error(msg);
+    }
+
     const { data } = supabase.storage.from('avatars').getPublicUrl(path);
     return data.publicUrl;
 }
@@ -557,6 +576,49 @@ export async function getAllAdmins(): Promise<User[]> {
         .from('users')
         .select('*, community:communities(name, address, is_active)')
         .in('role', ['ADMIN', 'SUPER_ADMIN'])
+        .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+}
+
+// ─── SUPER_ADMIN: usuarios + edición de rol/estado ───
+
+export async function getAllUsersWithDetails(): Promise<User[]> {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*, community:communities(id, name, community_type, admin_email)')
+        .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+}
+
+export async function updateUserRoleByAdmin(userId: string, role: 'USER' | 'ADMIN' | 'SUPER_ADMIN'): Promise<User> {
+    const { data, error } = await supabase
+        .from('users')
+        .update({ role })
+        .eq('id', userId)
+        .select('*, community:communities(id, name, community_type, admin_email)')
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+export async function updateUserStatusByAdmin(userId: string, status: 'ACTIVO' | 'INACTIVO'): Promise<User> {
+    const { data, error } = await supabase
+        .from('users')
+        .update({ status })
+        .eq('id', userId)
+        .select('*, community:communities(id, name, community_type, admin_email)')
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+export async function getAllPendingRequests(): Promise<JoinRequest[]> {
+    const { data, error } = await supabase
+        .from('join_requests')
+        .select('*, community:communities(name)')
+        .eq('status', 'PENDIENTE')
         .order('created_at', { ascending: false });
     if (error) throw error;
     return data || [];

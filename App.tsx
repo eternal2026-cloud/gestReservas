@@ -436,11 +436,13 @@ function HomePage() {
                     <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--primary-light)' }}>apartment</span>
                     <h3 style={{ margin: '12px 0 8px' }}>Únete a tu torre</h3>
                     <p style={{ color: 'var(--text-2)', fontSize: 14, marginBottom: 16 }}>
-                        Para reservar espacios, ver la comunidad y ganar puntos, primero debes unirte o crear una torre.
+                        Para reservar espacios, ver la comunidad y ganar puntos, primero debes unirte a una torre o comunidad ya registrada.
                     </p>
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
                         <button className="btn btn-primary" onClick={() => go('join-community')}>Unirme a una torre</button>
-                        <button className="btn btn-ghost" onClick={() => go('join-community', { createMode: true })}>Crear torre nueva</button>
+                        {user?.role === 'SUPER_ADMIN' && (
+                            <button className="btn btn-ghost" onClick={() => go('join-community', { createMode: true })}>Crear torre nueva</button>
+                        )}
                     </div>
                 </div>
             ) : (
@@ -992,11 +994,19 @@ function ProfilePage() {
             const url = await api.uploadAvatar(user.id, file);
             const updated = await api.updateUserProfile(user.id, { avatar_url: url });
             setUser(updated);
-            if (user.community_id) {
+            // Solo damos puntos la primera vez que sube foto (si no tenía avatar previo)
+            const firstUpload = !user.avatar_url;
+            if (firstUpload && user.community_id) {
                 await api.awardPoints(user.id, user.community_id, 'PROFILE_PHOTO', 20, 'Foto de perfil subida');
+                toast('✅ Foto actualizada (+20 pts)');
+            } else {
+                toast('✅ Foto actualizada');
             }
-            toast('✅ Foto actualizada (+20 pts)');
-        } catch { toast('Error al subir foto'); }
+        } catch (err: any) {
+            toast('Error al subir foto: ' + (err?.message || 'desconocido'));
+        }
+        // Limpia el input para permitir re-subir el mismo archivo
+        e.target.value = '';
         setUploading(false);
     };
 
@@ -1082,11 +1092,16 @@ function JoinCommunityPage() {
     const { user, setUser, go, toast, viewData } = useApp();
     const [communities, setCommunities] = useState<Community[]>([]);
     const [selected, setSelected] = useState('');
-    const [tower, setTower] = useState('');
+    // Bloque / Torre se elige con 2 dropdowns: tipo + letra → evita duplicidad por digitación
+    const [towerKind, setTowerKind] = useState<'Torre' | 'Bloque'>('Torre');
+    const [towerLetter, setTowerLetter] = useState('');
+    const tower = towerLetter ? `${towerKind} ${towerLetter}` : '';
     const [unit, setUnit] = useState('');
     const [occupiedUnits, setOccupiedUnits] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
-    const [createMode, setCreateMode] = useState(viewData?.createMode || false);
+    // Solo SUPER_ADMIN puede crear torres nuevas; los demás siempre llegan en modo "unirse"
+    const canCreate = user?.role === 'SUPER_ADMIN';
+    const [createMode, setCreateMode] = useState(canCreate && (viewData?.createMode || false));
     const [newName, setNewName] = useState('');
     const [newAddress, setNewAddress] = useState('');
     const [newDistrict, setNewDistrict] = useState('');
@@ -1158,12 +1173,14 @@ function JoinCommunityPage() {
             <button className="btn btn-ghost btn-sm" onClick={() => go('home')} style={{ marginBottom: 12 }}>
                 <span className="material-symbols-outlined">arrow_back</span> Volver
             </button>
-            <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                <button className={`btn btn-full ${!createMode ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(false)}>Unirme a torre</button>
-                <button className={`btn btn-full ${createMode ? 'btn-primary' : 'btn-ghost'}`}
-                    style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(true)}>Crear torre nueva</button>
-            </div>
+            {canCreate && (
+                <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}>
+                    <button className={`btn btn-full ${!createMode ? 'btn-primary' : 'btn-ghost'}`}
+                        style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(false)}>Unirme a torre</button>
+                    <button className={`btn btn-full ${createMode ? 'btn-primary' : 'btn-ghost'}`}
+                        style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(true)}>Crear torre nueva</button>
+                </div>
+            )}
             {!createMode ? (
                 <>
                     <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }} className="stagger-item">Unirme a torre existente</h3>
@@ -1189,8 +1206,24 @@ function JoinCommunityPage() {
                         </div>
                     )}
 
-                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Bloque / Torre (si aplica)</label>
-                    <input className="input stagger-item" placeholder="Ej: Torre A" value={tower} onChange={e => setTower(e.target.value)} style={{ marginBottom: 12 }} />
+                    {selectedCommunity && (selectedCommunity.num_buildings || 1) > 1 && (
+                        <>
+                            <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Bloque / Torre</label>
+                            <div className="stagger-item" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                                <select className="input" value={towerKind} onChange={e => setTowerKind(e.target.value as 'Torre' | 'Bloque')}>
+                                    <option value="Torre">Torre</option>
+                                    <option value="Bloque">Bloque</option>
+                                </select>
+                                <select className="input" value={towerLetter} onChange={e => setTowerLetter(e.target.value)}>
+                                    <option value="">Selecciona…</option>
+                                    {Array.from({ length: selectedCommunity.num_buildings || 1 }).map((_, i) => {
+                                        const letter = String.fromCharCode(65 + i);
+                                        return <option key={letter} value={letter}>{letter}</option>;
+                                    })}
+                                </select>
+                            </div>
+                        </>
+                    )}
 
                     <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Departamento (selecciona uno)</label>
                     <select
@@ -1286,7 +1319,19 @@ function JoinCommunityPage() {
                     </div>
 
                     <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tu bloque / torre</label>
-                    <input className="input" placeholder="Ej: Torre A" value={tower} onChange={e => setTower(e.target.value)} style={{ marginBottom: 12 }} />
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                        <select className="input" value={towerKind} onChange={e => setTowerKind(e.target.value as 'Torre' | 'Bloque')}>
+                            <option value="Torre">Torre</option>
+                            <option value="Bloque">Bloque</option>
+                        </select>
+                        <select className="input" value={towerLetter} onChange={e => setTowerLetter(e.target.value)}>
+                            <option value="">Selecciona…</option>
+                            {Array.from({ length: numBuildings }).map((_, i) => {
+                                const letter = String.fromCharCode(65 + i);
+                                return <option key={letter} value={letter}>{letter}</option>;
+                            })}
+                        </select>
+                    </div>
                     <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tu piso y depto (auto-generado)</label>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 4 }}>
                         <div>
