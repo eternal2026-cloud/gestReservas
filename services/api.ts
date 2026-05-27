@@ -93,6 +93,41 @@ export async function getTowerUsers(communityId: string, tower: string): Promise
     return data || [];
 }
 
+// Devuelve el usuario activo que YA ocupa ese (torre, depto) en la comunidad,
+// o null si está libre. Sirve para bloquear duplicados antes de crear solicitudes.
+export async function getApartmentOccupant(
+    communityId: string, tower: string, apartment: string,
+): Promise<User | null> {
+    const t = (tower || '').trim();
+    const a = (apartment || '').trim();
+    if (!communityId || !a) return null;
+    let q = supabase
+        .from('users')
+        .select('id, email, name, tower, apartment, status')
+        .eq('community_id', communityId)
+        .eq('apartment', a)
+        .eq('status', 'ACTIVO');
+    if (t) q = q.eq('tower', t);
+    const { data, error } = await q;
+    if (error || !data || data.length === 0) return null;
+    return data[0] as unknown as User;
+}
+
+// Devuelve los pares (tower, apartment) tomados por solicitudes PENDIENTES
+// para una comunidad. Útil para evitar que dos vecinos pidan el mismo depto
+// antes de que el admin apruebe.
+export async function getPendingApartmentClaims(
+    communityId: string,
+): Promise<{ tower: string | null; unit: string | null; user_email: string }[]> {
+    const { data, error } = await supabase
+        .from('join_requests')
+        .select('tower, unit, user_email')
+        .eq('community_id', communityId)
+        .eq('status', 'PENDIENTE');
+    if (error) return [];
+    return data || [];
+}
+
 
 export async function getAllUsers(): Promise<User[]> {
     const { data, error } = await supabase
@@ -242,11 +277,36 @@ export async function cancelReservation(reservationId: string): Promise<void> {
 }
 
 export async function gradeReservation(reservationId: string, grade: 'CUMPLIDA' | 'INCUMPLIDA', compliance_pct: number = 100): Promise<void> {
+    // Recuperamos antes del update para poder otorgar los puntos correctos.
+    const { data: prev } = await supabase
+        .from('reservations')
+        .select('*, amenity:amenities(name, points_reward, community_id), user:users(id, community_id)')
+        .eq('id', reservationId)
+        .single();
+
     const { error } = await supabase
         .from('reservations')
         .update({ grade, status: 'FINALIZADA', compliance_pct })
         .eq('id', reservationId);
     if (error) throw error;
+
+    // Sumar puntos al vecino SOLO si la reserva fue calificada como CUMPLIDA y aún
+    // no había sido auditada. Los puntos se otorgan proporcionalmente al
+    // % de cumplimiento (slider 0–100%) descrito en el plan.
+    if (prev && grade === 'CUMPLIDA' && prev.grade === 'PENDIENTE') {
+        const userId = prev.user?.id || prev.user_id;
+        const communityId = prev.amenity?.community_id || prev.user?.community_id;
+        const base = prev.amenity?.points_reward || 10;
+        const earned = Math.max(0, Math.round((base * (compliance_pct ?? 100)) / 100));
+        if (userId && communityId && earned > 0) {
+            try {
+                await awardPoints(
+                    userId, communityId, 'RESERVATION_COMPLETED', earned,
+                    `Reserva cumplida en ${prev.amenity?.name || 'amenidad'} (${compliance_pct ?? 100}%)`,
+                );
+            } catch { /* no rompemos el grading si falla el log */ }
+        }
+    }
 }
 
 export async function getAllReservationsForAudit(communityId?: string): Promise<Reservation[]> {
@@ -299,6 +359,25 @@ export async function likePost(postId: string, userId: string): Promise<void> {
             await supabase.from('posts').update({ likes_count: (post.likes_count || 0) + 1 }).eq('id', postId);
         }
     }
+
+    // Premiar al autor del post con +2 pts (POINT_ACTIONS.LIKE_RECEIVED).
+    // Antes esta acción estaba definida en el tipo pero nunca se otorgaba: por eso
+    // varios usuarios "no sumaban puntos al interactuar" aunque la cuenta de likes
+    // de su post sí crecía.
+    const { data: post } = await supabase
+        .from('posts')
+        .select('user_id, community_id')
+        .eq('id', postId)
+        .single();
+    if (post && post.user_id && post.user_id !== userId) {
+        await supabase.rpc('award_points_to_user', {
+            recipient_id: post.user_id,
+            community: post.community_id,
+            action_name: 'LIKE_RECEIVED',
+            pts: 2,
+            reason: 'Recibió un like en su publicación',
+        });
+    }
 }
 
 export async function unlikePost(postId: string, userId: string): Promise<void> {
@@ -338,6 +417,31 @@ export async function addComment(comment: Partial<Comment>): Promise<Comment> {
 // ─── Join Requests ───
 
 export async function createJoinRequest(request: Partial<JoinRequest>): Promise<JoinRequest> {
+    // Candado 1: ¿alguien ya vive en esta torre+depto?
+    if (request.community_id && request.unit) {
+        const occupant = await getApartmentOccupant(
+            request.community_id, request.tower || '', request.unit,
+        );
+        if (occupant && occupant.email !== request.user_email) {
+            throw new Error(
+                `Ese depto ya está registrado por ${occupant.name || occupant.email}. ` +
+                `Elige otro o contacta al administrador.`
+            );
+        }
+        // Candado 2: ¿hay otra solicitud PENDIENTE para el mismo depto?
+        const pending = await getPendingApartmentClaims(request.community_id);
+        const conflict = pending.find(p =>
+            (p.unit || '').trim() === (request.unit || '').trim() &&
+            (p.tower || '').trim() === (request.tower || '').trim() &&
+            p.user_email !== request.user_email
+        );
+        if (conflict) {
+            throw new Error(
+                `Ya existe una solicitud pendiente para ese depto (${conflict.user_email}). ` +
+                `Espera la decisión del admin o elige otro.`
+            );
+        }
+    }
     const { data, error } = await supabase
         .from('join_requests')
         .insert(request)
@@ -365,6 +469,19 @@ export async function approveJoinRequest(requestId: string): Promise<void> {
         .eq('id', requestId)
         .single();
     if (fetchError) throw fetchError;
+
+    // Candado: no aprobar si otro vecino ya ocupa ese depto en la torre
+    if (request?.community_id && request?.unit) {
+        const occupant = await getApartmentOccupant(
+            request.community_id, request.tower || '', request.unit,
+        );
+        if (occupant && occupant.email !== request.user_email) {
+            throw new Error(
+                `No se puede aprobar: ${occupant.name || occupant.email} ya está registrado en ` +
+                `${request.tower ? request.tower + ' · ' : ''}Dpto ${request.unit}.`
+            );
+        }
+    }
 
     // Update request status
     const { error: updateError } = await supabase
@@ -429,17 +546,21 @@ export async function awardPoints(
     action: string,
     points: number,
     description?: string
-): Promise<void> {
-    // Log the points
+): Promise<{ newPoints: number } | null> {
+    // Log the points (puede fallar por RLS si el caller no es admin/super; ahí
+    // confiamos en la RPC del lado servidor para los casos cruzados como LIKE_RECEIVED)
     const { error: logError } = await supabase
         .from('point_logs')
         .insert({ user_id: userId, community_id: communityId, action, points, description });
-    if (logError) throw logError;
+    if (logError) return null;
 
     // Update user points
     const { data: user } = await supabase.from('users').select('points').eq('id', userId).single();
+    let newPoints: number | null = null;
     if (user) {
-        await supabase.from('users').update({ points: (user.points || 0) + points }).eq('id', userId);
+        const updated = (user.points || 0) + points;
+        const { error: updErr } = await supabase.from('users').update({ points: updated }).eq('id', userId);
+        if (!updErr) newPoints = updated;
     }
 
     // Update community total points
@@ -447,6 +568,20 @@ export async function awardPoints(
     if (community) {
         await supabase.from('communities').update({ total_points: (community.total_points || 0) + points }).eq('id', communityId);
     }
+
+    return newPoints !== null ? { newPoints } : null;
+}
+
+// Refresca el usuario completo desde la BD. Útil tras awardPoints para que la UI
+// no quede con un user.points stale (causa de "no suman puntos al interactuar").
+export async function refreshUserById(userId: string): Promise<User | null> {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*, community:communities(*)')
+        .eq('id', userId)
+        .single();
+    if (error) return null;
+    return data;
 }
 
 export async function getUserPointLogs(userId: string): Promise<PointLog[]> {
@@ -858,6 +993,32 @@ export async function getEligibility(
         reasons,
         canReserve,
     };
+}
+
+// ─── Validación de accesos QR (uso único de invitado) ───
+export interface GuestPassResult {
+    status: 'OK' | 'ALREADY_USED' | 'FORBIDDEN';
+    used_at?: string;
+    guest_name?: string;
+    apartment?: string;
+}
+
+// Marca un QR de invitado (identificado por su jti único) como usado y devuelve
+// el resultado. La lógica de uso único es atómica en el servidor (RPC).
+export async function validateGuestPass(
+    jti: string,
+    communityId: string,
+    apartment: string | null,
+    guestName: string | null,
+): Promise<GuestPassResult> {
+    const { data, error } = await supabase.rpc('validate_guest_pass', {
+        p_jti: jti,
+        p_community: communityId,
+        p_apartment: apartment,
+        p_guest_name: guestName,
+    });
+    if (error) throw error;
+    return data as GuestPassResult;
 }
 
 export async function logAudit(action: string, entityType: string, entityId: string, metadata?: Record<string, any>) {

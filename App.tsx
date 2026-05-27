@@ -9,6 +9,7 @@ import { Splash } from './components/Splash';
 import { SuperAdminPage } from './pages/SuperAdminPage';
 import { SanctionsPage } from './pages/SanctionsPage';
 import { QrAccessPage } from './pages/QrAccessPage';
+import { QrValidatePage } from './pages/QrValidatePage';
 import { generateStructure, flatApartments, communityTypeLabel } from './services/structure';
 import anime from 'animejs';
 
@@ -17,6 +18,7 @@ import anime from 'animejs';
 interface AppCtx {
     user: User | null;
     setUser: (u: User | null) => void;
+    refreshUser: () => Promise<void>;
     theme: ThemeMode;
     toggleTheme: () => void;
     view: AppView;
@@ -71,7 +73,45 @@ export default function App() {
     const go = (v: AppView, data?: any) => { setView(v); setViewData(data); window.scrollTo(0, 0); };
     const toast = (msg: string) => setToastMsg(msg);
 
-    const ctx: AppCtx = { user, setUser, theme, toggleTheme, view, go, viewData, toast };
+    // Refresca el user actual desde BD. Lo invocamos tras awardPoints para que
+    // el badge de puntos del Home/Perfil refleje la nueva suma sin tener que
+    // cerrar sesión.
+    const refreshUser = async () => {
+        if (!user?.id) return;
+        const fresh = await api.refreshUserById(user.id);
+        if (fresh) setUser(fresh);
+    };
+
+    // ── Captura la sesión al volver del enlace de confirmación de email ──
+    // Supabase redirige con access_token en el hash; onAuthStateChange recoge
+    // el evento SIGNED_IN automáticamente y aquí completamos el perfil.
+    useEffect(() => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            async (event, session) => {
+                if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user && !user) {
+                    const authUser = session.user;
+                    let profile = await api.getUserByAuthId(authUser.id);
+                    if (!profile) profile = await api.getUserByEmail(authUser.email ?? '');
+                    if (!profile) {
+                        profile = await api.createUserProfile({
+                            auth_id: authUser.id,
+                            email: authUser.email ?? '',
+                            name: (authUser.email ?? '').split('@')[0],
+                            role: 'USER',
+                            points: 0,
+                            status: 'ACTIVO',
+                        });
+                    }
+                    setUser(profile);
+                    setView('home');
+                }
+            },
+        );
+        return () => subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const ctx: AppCtx = { user, setUser, refreshUser, theme, toggleTheme, view, go, viewData, toast };
 
     return (
         <Ctx.Provider value={ctx}>
@@ -97,6 +137,9 @@ export default function App() {
                                 )}
                                 {view === 'qr-access' && user && (
                                     <QrAccessPage user={user} onBack={() => go('home')} onToast={toast} />
+                                )}
+                                {view === 'qr-validate' && user && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') && (
+                                    <QrValidatePage user={user} onBack={() => go('admin')} onToast={toast} />
                                 )}
                             </ViewTransition>
                         </div>
@@ -131,7 +174,7 @@ function TopBar() {
     return (
         <div className="top-bar">
             <div className="logo" style={{ cursor: 'pointer' }} onClick={() => go('home')}>
-                <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <svg width="38" height="38" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <rect width="40" height="40" rx="12" fill="#7C3AED" />
                     <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                     <path d="M20 28V22" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
@@ -329,7 +372,7 @@ function LoginPage() {
             <div className="login-bg-orb login-bg-orb-2" />
             <div className="login-card">
                 <div className="login-logo">
-                    <svg width="80" height="80" viewBox="0 0 40 40" fill="none">
+                    <svg viewBox="0 0 40 40" fill="none">
                         <rect width="40" height="40" rx="12" fill="#7C3AED" />
                         <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                         <circle cx="20" cy="16" r="2" fill="white" />
@@ -366,7 +409,7 @@ function LoginPage() {
             </div>
             <div className="login-card">
                 <div className="login-logo">
-                    <svg width="80" height="80" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ margin: '0 auto', filter: 'drop-shadow(0 4px 12px rgba(124,58,237,0.4))' }}>
+                    <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <rect width="40" height="40" rx="12" fill="#7C3AED" />
                         <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                         <path d="M20 28V22" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
@@ -639,7 +682,8 @@ function BookingPage() {
                 }
             }
             const created = await api.createReservation({ user_id: user.id, amenity_id: amenity.id, date, time_slot: slot });
-            if (user.community_id) await api.awardPoints(user.id, user.community_id, 'RESERVATION_COMPLETED', amenity.points_reward || 10, `Reserva en ${amenity.name}`);
+            // Los puntos se otorgan cuando el admin marca la reserva como CUMPLIDA en
+            // Auditoría — antes los dábamos en este punto, lo que falseaba los rankings.
             toast(`✅ Reserva ${created.code || 'confirmada'} · ${amenity.name}`);
             go('my-reservations');
         } catch (e: any) { toast('❌ ' + (e.message || 'Error')); }
@@ -765,7 +809,7 @@ function MyReservationsPage() {
 
 // ─── CommunityPage ───
 function CommunityPage() {
-    const { user, toast, go } = useApp();
+    const { user, toast, go, refreshUser } = useApp();
     const [posts, setPosts] = useState<Post[]>([]);
     const [text, setText] = useState('');
     const [likedIds, setLikedIds] = useState<string[]>([]);
@@ -801,6 +845,7 @@ function CommunityPage() {
             setPosts([post, ...posts]);
             const pts = type === 'FOTO_AREA' ? 15 : type === 'BUG_REPORT' ? 25 : 5;
             await api.awardPoints(user.id, user.community_id!, type === 'BUG_REPORT' ? 'BUG_REPORT' : type === 'FOTO_AREA' ? 'UPLOAD_AREA_PHOTO' : 'COMMENT', pts, type === 'FOTO_AREA' ? 'Foto de área común subida' : undefined);
+            await refreshUser();
             setText('');
             setPostImage(null);
             toast(`+${pts} puntos`);
@@ -822,6 +867,7 @@ function CommunityPage() {
             const c = await api.addComment({ post_id: postId, user_id: user.id, text: commentText });
             setPosts(p => p.map(x => x.id === postId ? { ...x, comments: [...(x.comments || []), c] } : x));
             await api.awardPoints(user.id, user.community_id!, 'COMMENT', 5, 'Comentario en comunidad');
+            await refreshUser();
             setCommentText('');
             toast('+5 puntos');
         } catch { }
@@ -993,15 +1039,21 @@ function ProfilePage() {
         try {
             const url = await api.uploadAvatar(user.id, file);
             const updated = await api.updateUserProfile(user.id, { avatar_url: url });
-            setUser(updated);
             // Solo damos puntos la primera vez que sube foto (si no tenía avatar previo)
             const firstUpload = !user.avatar_url;
             if (firstUpload && user.community_id) {
                 await api.awardPoints(user.id, user.community_id, 'PROFILE_PHOTO', 20, 'Foto de perfil subida');
+                // Re-leemos el user (incluye points y avatar_url) para reflejar
+                // tanto la foto como la nueva suma de puntos.
+                const fresh = await api.refreshUserById(user.id);
+                setUser(fresh || updated);
                 toast('✅ Foto actualizada (+20 pts)');
             } else {
+                setUser(updated);
                 toast('✅ Foto actualizada');
             }
+            // Refresca historial de puntos al volver a render
+            api.getUserPointLogs(user.id).then(l => setLogs(l.slice(0, 10)));
         } catch (err: any) {
             toast('Error al subir foto: ' + (err?.message || 'desconocido'));
         }
@@ -1095,9 +1147,17 @@ function JoinCommunityPage() {
     // Bloque / Torre se elige con 2 dropdowns: tipo + letra → evita duplicidad por digitación
     const [towerKind, setTowerKind] = useState<'Torre' | 'Bloque'>('Torre');
     const [towerLetter, setTowerLetter] = useState('');
-    const tower = towerLetter ? `${towerKind} ${towerLetter}` : '';
+    // Si la comunidad tiene un solo edificio no se muestra el picker; en ese caso
+    // usamos "Torre A" para que coincida con el dato que el admin guarda por defecto
+    // y no se cuelen duplicados por mismatch entre "" y "Torre A".
+    const _selectedForTower = communities.find(c => c.id === selected);
+    const singleBuilding = !!_selectedForTower && (_selectedForTower.num_buildings || 1) <= 1;
+    const tower = singleBuilding ? 'Torre A' : (towerLetter ? `${towerKind} ${towerLetter}` : '');
     const [unit, setUnit] = useState('');
-    const [occupiedUnits, setOccupiedUnits] = useState<string[]>([]);
+    // Mapa { 'TorreA|101': 'ocupado' | 'pendiente' } para anular dptos por torre.
+    // Antes solo guardábamos un array global de dptos: bloqueaba 101 en TODAS las torres
+    // si alguien tenía Torre A 101 (falso positivo), o NO bloqueaba si solo había sol. pendientes.
+    const [occupiedMap, setOccupiedMap] = useState<Record<string, 'ocupado' | 'pendiente'>>({});
     const [loading, setLoading] = useState(false);
     // Solo SUPER_ADMIN puede crear torres nuevas; los demás siempre llegan en modo "unirse"
     const canCreate = user?.role === 'SUPER_ADMIN';
@@ -1122,23 +1182,53 @@ function JoinCommunityPage() {
 
     useEffect(() => { api.getCommunities().then(setCommunities); }, []);
 
-    // Al seleccionar comunidad, carga dptos ocupados (anti-duplicado)
+    // Al seleccionar comunidad o torre, recarga dptos ocupados Y solicitudes pendientes
+    // (anti-duplicado por torre). La clave es `${tower}|${apt}` para no bloquear
+    // depto 101 en Torre B solo porque alguien lo ocupa en Torre A.
     useEffect(() => {
-        if (!selected) { setOccupiedUnits([]); return; }
-        api.getCommunityUsers(selected).then(users => {
-            setOccupiedUnits(users.map(u => u.apartment).filter(Boolean) as string[]);
-        });
+        if (!selected) { setOccupiedMap({}); return; }
+        (async () => {
+            const [users, pending] = await Promise.all([
+                api.getCommunityUsers(selected),
+                api.getPendingApartmentClaims(selected),
+            ]);
+            const map: Record<string, 'ocupado' | 'pendiente'> = {};
+            users.forEach(u => {
+                if (!u.apartment) return;
+                const key = `${(u.tower || '').trim()}|${u.apartment.trim()}`;
+                map[key] = 'ocupado';
+            });
+            pending.forEach(p => {
+                if (!p.unit) return;
+                const key = `${(p.tower || '').trim()}|${(p.unit || '').trim()}`;
+                if (!map[key]) map[key] = 'pendiente';
+            });
+            setOccupiedMap(map);
+        })();
         setUnit('');
-    }, [selected]);
+    }, [selected, tower]);
 
     const submitJoin = async () => {
         if (!selected || !user) return;
+        // Doble verificación en cliente: si el depto ya está tomado en esta torre,
+        // mostramos el motivo exacto sin pegarle al servidor.
+        const key = `${tower.trim()}|${unit.trim()}`;
+        if (occupiedMap[key] === 'ocupado') {
+            toast(`🔒 ${tower || 'La torre'} · Dpto ${unit} ya tiene vecino registrado.`);
+            return;
+        }
+        if (occupiedMap[key] === 'pendiente') {
+            toast(`⏳ ${tower || 'La torre'} · Dpto ${unit} tiene una solicitud pendiente.`);
+            return;
+        }
         setLoading(true);
         try {
             await api.createJoinRequest({ community_id: selected, user_email: user.email, user_name: user.name, tower, unit });
             toast('✅ Solicitud enviada. El admin debe aprobarla.');
             go('home');
-        } catch { toast('Error al enviar solicitud'); }
+        } catch (e: any) {
+            toast(e?.message || 'Error al enviar solicitud');
+        }
         setLoading(false);
     };
 
@@ -1198,9 +1288,10 @@ function JoinCommunityPage() {
                                 🏢 {selectedCommunity.total_floors} pisos × {selectedCommunity.rooms_per_floor} dptos =
                                 {' '}<strong>{selectedCommunity.total_floors * selectedCommunity.rooms_per_floor} unidades</strong>
                             </p>
-                            {occupiedUnits.length > 0 && (
+                            {Object.keys(occupiedMap).length > 0 && (
                                 <p style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                                    {occupiedUnits.length} departamentos ya tienen vecino registrado.
+                                    {Object.values(occupiedMap).filter(v => v === 'ocupado').length} dptos registrados ·
+                                    {' '}{Object.values(occupiedMap).filter(v => v === 'pendiente').length} solicitudes pendientes
                                 </p>
                             )}
                         </div>
@@ -1236,11 +1327,14 @@ function JoinCommunityPage() {
                         {selectedCommunity && generateStructure(selectedCommunity.total_floors, selectedCommunity.rooms_per_floor).map(f => (
                             <optgroup key={f.floor} label={`Piso ${f.floor}`}>
                                 {f.apartments.map(a => {
-                                    const occupied = occupiedUnits.includes(a);
+                                    // Bloqueamos por torre+depto: 101 en Torre A no afecta a 101 en Torre B
+                                    const status = occupiedMap[`${tower.trim()}|${a}`];
+                                    const disabled = !!status;
+                                    const tag = status === 'ocupado' ? ' · 🔒 ocupado'
+                                              : status === 'pendiente' ? ' · ⏳ solicitud pendiente'
+                                              : ' · libre';
                                     return (
-                                        <option key={a} value={a} disabled={occupied}>
-                                            {a}{occupied ? ' · 🔒 ocupado' : ' · libre'}
-                                        </option>
+                                        <option key={a} value={a} disabled={disabled}>{a}{tag}</option>
                                     );
                                 })}
                             </optgroup>
@@ -1514,12 +1608,13 @@ function AdminPage() {
             <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>admin_panel_settings</span> Panel Admin</h2>
             {[{ icon: 'meeting_room', title: 'Espacios', desc: 'Crear y gestionar áreas', v: 'spaces' },
             { icon: 'people', title: 'Usuarios', desc: 'Gestionar vecinos', v: 'users' },
+            { icon: 'qr_code_scanner', title: 'Validar QR', desc: 'Escanear acceso de vecinos e invitados', v: 'qr-validate' },
             { icon: 'fact_check', title: 'Auditoría', desc: 'Calificar reservas', v: 'audit' },
             { icon: 'mail', title: 'Solicitudes', desc: 'Aprobar ingresos', v: 'requests' },
             { icon: 'gavel', title: 'Reglas', desc: 'Sanciones y restricciones', v: 'rules' },
             { icon: 'analytics', title: 'Analytics', desc: 'Dashboard', v: 'analytics' }
             ].map(item => (
-                <div key={item.v} className="admin-card" onClick={() => load(item.v)}>
+                <div key={item.v} className="admin-card" onClick={() => item.v === 'qr-validate' ? go('qr-validate') : load(item.v)}>
                     <div className="admin-card-icon"><span className="material-symbols-outlined">{item.icon}</span></div>
                     <div className="admin-card-info"><h4>{item.title}</h4><p>{item.desc}</p></div>
                     <span className="material-symbols-outlined" style={{ color: 'var(--text-3)' }}>chevron_right</span>

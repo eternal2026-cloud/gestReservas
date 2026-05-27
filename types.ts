@@ -179,7 +179,8 @@ export type AppView =
     | 'admin-requests'
     | 'admin-analytics'
     | 'super-admin'
-    | 'qr-access';
+    | 'qr-access'
+    | 'qr-validate';
 
 export interface PointAction {
     action: string;
