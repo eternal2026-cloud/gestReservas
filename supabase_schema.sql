@@ -529,3 +529,16 @@ CREATE POLICY audit_logs_insert ON audit_logs FOR INSERT
 -- 2) Tras confirmar el correo, en SQL Editor:
 --    UPDATE users SET role='SUPER_ADMIN' WHERE email = 'tu@correo.com';
 -- 3) Salir y volver a entrar a la app — verás el botón Super Admin.
+
+-- email_has_account
+-- Permite a la UI avisar "ya tienes cuenta" / "no existe cuenta con ese correo"
+-- en registro y recuperación de clave (Supabase lo oculta por anti-enumeración).
+CREATE OR REPLACE FUNCTION public.email_has_account(p_email text)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS(SELECT 1 FROM auth.users WHERE lower(email) = lower(trim(p_email)));
+$$;
+REVOKE ALL ON FUNCTION public.email_has_account(text) FROM public;
+GRANT EXECUTE ON FUNCTION public.email_has_account(text) TO anon, authenticated;

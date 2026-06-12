@@ -327,6 +327,14 @@ function LoginPage() {
         setLoading(true);
         setError('');
         try {
+            // Supabase finge éxito aunque el correo no exista (anti-enumeración);
+            // verificamos antes para avisar al vecino con claridad.
+            const { data: exists } = await supabase.rpc('email_has_account', { p_email: recoveryEmail });
+            if (exists === false) {
+                setError('No existe ninguna cuenta con ese correo. Verifica que esté bien escrito o regístrate.');
+                setLoading(false);
+                return;
+            }
             const { error: err } = await supabase.auth.resetPasswordForEmail(recoveryEmail, {
                 redirectTo: SITE_URL,
             });
@@ -348,10 +356,24 @@ function LoginPage() {
         manualAuthInProgress = true;
         try {
             if (isRegister) {
-                const { data } = await supabase.auth.signUp({
+                // Aviso claro si el correo ya tiene cuenta (Supabase lo oculta
+                // por defecto devolviendo un usuario "fantasma" sin identities).
+                const { data: exists } = await supabase.rpc('email_has_account', { p_email: email });
+                if (exists === true) {
+                    setError('Ya existe una cuenta con ese correo. Inicia sesión o usa "¿Olvidaste tu clave?".');
+                    setLoading(false);
+                    return;
+                }
+                const { data, error: signUpErr } = await supabase.auth.signUp({
                     email, password,
                     options: { emailRedirectTo: SITE_URL },
                 });
+                if (signUpErr) throw signUpErr;
+                if (data?.user && data.user.identities?.length === 0) {
+                    setError('Ya existe una cuenta con ese correo. Inicia sesión o usa "¿Olvidaste tu clave?".');
+                    setLoading(false);
+                    return;
+                }
                 if (data?.user && !data.user.email_confirmed_at) {
                     setEmailSent(true);
                     setLoading(false);
