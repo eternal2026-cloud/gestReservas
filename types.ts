@@ -163,6 +163,7 @@ export type ThemeMode = 'dark' | 'light';
 
 export type AppView =
     | 'login'
+    | 'reset-password'
     | 'home'
     | 'amenities'
     | 'amenity-detail'

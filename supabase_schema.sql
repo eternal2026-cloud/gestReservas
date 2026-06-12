@@ -56,6 +56,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_one_admin_per_community
   ON users(community_id)
   WHERE role = 'ADMIN' AND status = 'ACTIVO';
 
+-- Un vecino único por (comunidad, torre, depto) — antes se filtraban duplicados
+-- solo en la UI; ahora la BD bloquea el caso edge (dos solicitudes aprobadas
+-- en paralelo, edición manual del rol, etc).
+CREATE UNIQUE INDEX IF NOT EXISTS users_one_per_apartment
+  ON users(community_id, tower, apartment)
+  WHERE community_id IS NOT NULL
+    AND tower IS NOT NULL
+    AND apartment IS NOT NULL
+    AND status = 'ACTIVO';
+
 -- ─── Espacios comunes / Amenidades ───
 CREATE TABLE IF NOT EXISTS amenities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -255,6 +265,45 @@ LANGUAGE sql STABLE SECURITY DEFINER AS $$
       AND community_id = target_community
       AND status = 'ACTIVO'
   );
+$$;
+
+-- award_points_to_user
+-- Otorga puntos a OTRO vecino respetando límites de seguridad. Necesaria para
+-- LIKE_RECEIVED (el liker no puede actualizar users.points del autor bajo RLS).
+-- Reglas:
+--   • El caller debe estar autenticado y pertenecer a la misma comunidad que
+--     el destinatario (anti-abuso entre torres).
+--   • points debe ser positivo y razonable (≤ 100) para que un like no infle
+--     el ranking ilimitadamente.
+CREATE OR REPLACE FUNCTION award_points_to_user(
+  recipient_id UUID,
+  community UUID,
+  action_name TEXT,
+  pts INT,
+  reason TEXT DEFAULT NULL
+)
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  caller_community UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'No autenticado';
+  END IF;
+  IF pts IS NULL OR pts <= 0 OR pts > 100 THEN
+    RAISE EXCEPTION 'Puntos fuera de rango';
+  END IF;
+  SELECT community_id INTO caller_community
+    FROM users WHERE auth_id = auth.uid() LIMIT 1;
+  IF caller_community IS DISTINCT FROM community THEN
+    RAISE EXCEPTION 'Solo miembros de la misma comunidad pueden otorgar puntos';
+  END IF;
+
+  INSERT INTO point_logs(user_id, community_id, action, points, description)
+    VALUES (recipient_id, community, action_name, pts, reason);
+  UPDATE users SET points = COALESCE(points, 0) + pts WHERE id = recipient_id;
+  UPDATE communities SET total_points = COALESCE(total_points, 0) + pts WHERE id = community;
+END;
 $$;
 
 -- =====================================================

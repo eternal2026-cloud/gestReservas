@@ -10,3 +10,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// URL pública de la app desplegada. Los enlaces de los correos de Supabase
+// (confirmación y recuperación de clave) deben volver aquí, nunca a localhost.
+export const SITE_URL = import.meta.env.VITE_SITE_URL || 'https://gest-reservas.vercel.app';

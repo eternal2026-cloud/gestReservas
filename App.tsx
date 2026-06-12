@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, createContext, useContext } from 'r
 import * as api from './services/api';
 import type { User, Community, Amenity, Reservation, Post, ThemeMode, AppView } from './types';
 import { getUserLevel, POINT_ACTIONS } from './types';
-import { supabase } from './services/supabase';
+import { supabase, SITE_URL } from './services/supabase';
 import { Loader } from './components/Loader';
 import { ViewTransition } from './components/ViewTransition';
 import { Splash } from './components/Splash';
@@ -28,6 +28,10 @@ interface AppCtx {
 }
 const Ctx = createContext<AppCtx>({} as AppCtx);
 const useApp = () => useContext(Ctx);
+
+// Cuando LoginPage maneja el alta/inicio de sesión manualmente, el listener
+// global de auth no debe duplicar la carga/creación del perfil.
+let manualAuthInProgress = false;
 
 // ─── Toast ───
 function Toast({ msg, onClose, duration = 3000 }: { msg: string; onClose: () => void; duration?: number }) {
@@ -82,28 +86,59 @@ export default function App() {
         if (fresh) setUser(fresh);
     };
 
-    // ── Captura la sesión al volver del enlace de confirmación de email ──
-    // Supabase redirige con access_token en el hash; onAuthStateChange recoge
-    // el evento SIGNED_IN automáticamente y aquí completamos el perfil.
+    // userRef evita el cierre obsoleto (stale closure) dentro del listener de
+    // auth, que se suscribe una sola vez al montar.
+    const userRef = useRef<User | null>(null);
+    useEffect(() => { userRef.current = user; }, [user]);
+
+    // El enlace de recuperación llega con `type=recovery` en el hash; lo
+    // marcamos para no saltar al home antes de que el usuario cambie su clave.
+    const recoveryMode = useRef(window.location.hash.includes('type=recovery'));
+
+    // ── Captura la sesión al volver de los enlaces de email (confirmación o
+    // recuperación) y al recargar la página con sesión activa. ──
+    // IMPORTANTE: no usar await dentro del callback de onAuthStateChange:
+    // supabase-js mantiene un lock mientras corre el callback y cualquier
+    // consulta interna se bloquea (deadlock: la app se cuelga al iniciar
+    // sesión). El trabajo asíncrono se difiere con setTimeout.
     useEffect(() => {
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, session) => {
-                if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user && !user) {
+            (event, session) => {
+                if (event === 'PASSWORD_RECOVERY') {
+                    recoveryMode.current = true;
+                    setView('reset-password');
+                    return;
+                }
+                if (event === 'SIGNED_OUT') {
+                    checkedRejections.current = false;
+                    setUser(null);
+                    setView('login');
+                    return;
+                }
+                if ((event === 'INITIAL_SESSION' || event === 'SIGNED_IN') && session?.user) {
                     const authUser = session.user;
-                    let profile = await api.getUserByAuthId(authUser.id);
-                    if (!profile) profile = await api.getUserByEmail(authUser.email ?? '');
-                    if (!profile) {
-                        profile = await api.createUserProfile({
-                            auth_id: authUser.id,
-                            email: authUser.email ?? '',
-                            name: (authUser.email ?? '').split('@')[0],
-                            role: 'USER',
-                            points: 0,
-                            status: 'ACTIVO',
-                        });
-                    }
-                    setUser(profile);
-                    setView('home');
+                    setTimeout(async () => {
+                        if (userRef.current || manualAuthInProgress) return;
+                        try {
+                            let profile = await api.getUserByAuthId(authUser.id);
+                            if (!profile) profile = await api.getUserByEmail(authUser.email ?? '');
+                            if (!profile) {
+                                profile = await api.createUserProfile({
+                                    auth_id: authUser.id,
+                                    email: authUser.email ?? '',
+                                    name: (authUser.email ?? '').split('@')[0],
+                                    role: 'USER',
+                                    points: 0,
+                                    status: 'ACTIVO',
+                                });
+                            }
+                            setUser(profile);
+                            if (recoveryMode.current) setView('reset-password');
+                            else setView(v => v === 'login' ? 'home' : v);
+                        } catch (e) {
+                            console.error('No se pudo cargar el perfil:', e);
+                        }
+                    }, 0);
                 }
             },
         );
@@ -117,7 +152,7 @@ export default function App() {
         <Ctx.Provider value={ctx}>
             {!splashDone && <Splash onDone={() => setSplashDone(true)} />}
             <div className="app-container">
-                {view === 'login' ? <LoginPage /> : (
+                {view === 'login' ? <LoginPage /> : view === 'reset-password' ? <ResetPasswordPage recoveryMode={recoveryMode} /> : (
                     <>
                         <TopBar />
                         <div className="main-content">
@@ -293,7 +328,7 @@ function LoginPage() {
         setError('');
         try {
             const { error: err } = await supabase.auth.resetPasswordForEmail(recoveryEmail, {
-                redirectTo: window.location.origin,
+                redirectTo: SITE_URL,
             });
             if (err) throw err;
             toast('✉️ Revisa tu correo para restablecer la clave');
@@ -308,9 +343,13 @@ function LoginPage() {
         e.preventDefault();
         setLoading(true);
         setError('');
+        manualAuthInProgress = true;
         try {
             if (isRegister) {
-                const { data } = await supabase.auth.signUp({ email, password });
+                const { data } = await supabase.auth.signUp({
+                    email, password,
+                    options: { emailRedirectTo: SITE_URL },
+                });
                 if (data?.user && !data.user.email_confirmed_at) {
                     setEmailSent(true);
                     setLoading(false);
@@ -344,6 +383,8 @@ function LoginPage() {
             if (msg.includes('Email not confirmed')) setError('Revisa tu correo y confirma tu cuenta antes de iniciar sesión');
             else if (msg.includes('Invalid login')) setError('Correo o contraseña incorrectos');
             else setError(msg || 'Error de autenticación');
+        } finally {
+            manualAuthInProgress = false;
         }
         setLoading(false);
     };
@@ -443,6 +484,63 @@ function LoginPage() {
                 <button className="btn btn-ghost btn-full" style={{ marginTop: 8 }} onClick={() => { setIsRegister(!isRegister); setError(''); }}>
                     {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
                 </button>
+            </div>
+        </div>
+    );
+}
+
+// ─── ResetPasswordPage ───
+// Pantalla a la que llega el usuario desde el enlace "recuperar clave" del
+// correo (evento PASSWORD_RECOVERY de Supabase).
+function ResetPasswordPage({ recoveryMode }: { recoveryMode: React.MutableRefObject<boolean> }) {
+    const { user, go, toast } = useApp();
+    const [password, setPassword] = useState('');
+    const [confirm, setConfirm] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleReset = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (password.length < 6) { setError('La clave debe tener al menos 6 caracteres'); return; }
+        if (password !== confirm) { setError('Las claves no coinciden'); return; }
+        setLoading(true);
+        setError('');
+        try {
+            const { error: err } = await supabase.auth.updateUser({ password });
+            if (err) throw err;
+            recoveryMode.current = false;
+            // Limpia los tokens del enlace de recuperación de la URL
+            window.history.replaceState(null, '', window.location.pathname);
+            toast('🔒 Clave actualizada correctamente');
+            go(user ? 'home' : 'login');
+        } catch (e: any) {
+            setError(e.message || 'No se pudo actualizar la clave');
+        }
+        setLoading(false);
+    };
+
+    return (
+        <div className="login-container">
+            <div className="login-bg-orb login-bg-orb-1" />
+            <div className="login-bg-orb login-bg-orb-2" />
+            <div className="login-card">
+                <div className="login-logo">
+                    <svg viewBox="0 0 40 40" fill="none">
+                        <rect width="40" height="40" rx="12" fill="#7C3AED" />
+                        <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                        <circle cx="20" cy="16" r="2" fill="white" />
+                    </svg>
+                    <h1>Nueva clave</h1>
+                    <p>Escribe tu nueva contraseña</p>
+                </div>
+                {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>{error}</div>}
+                <form className="login-form" onSubmit={handleReset}>
+                    <div><label>Nueva contraseña</label><input className="input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required /></div>
+                    <div><label>Confirmar contraseña</label><input className="input" type="password" placeholder="••••••••" value={confirm} onChange={e => setConfirm(e.target.value)} required /></div>
+                    <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
+                        {loading ? 'Guardando…' : 'Guardar nueva clave'}
+                    </button>
+                </form>
             </div>
         </div>
     );
