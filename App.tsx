@@ -334,7 +334,9 @@ function LoginPage() {
             toast('✉️ Revisa tu correo para restablecer la clave');
             setShowRecovery(false);
         } catch (e: any) {
-            setError(e.message || 'Error al enviar correo');
+            const msg = e.message || '';
+            if (msg.toLowerCase().includes('rate limit')) setError('Se alcanzó el límite de correos por hora del servidor. Espera unos 60 minutos e inténtalo de nuevo.');
+            else setError(msg || 'Error al enviar correo');
         }
         setLoading(false);
     };
@@ -382,6 +384,7 @@ function LoginPage() {
             const msg = err.message || '';
             if (msg.includes('Email not confirmed')) setError('Revisa tu correo y confirma tu cuenta antes de iniciar sesión');
             else if (msg.includes('Invalid login')) setError('Correo o contraseña incorrectos');
+            else if (msg.toLowerCase().includes('rate limit')) setError('Se alcanzó el límite de correos por hora del servidor. Espera unos 60 minutos e inténtalo de nuevo.');
             else setError(msg || 'Error de autenticación');
         } finally {
             manualAuthInProgress = false;
