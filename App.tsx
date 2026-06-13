@@ -7,6 +7,7 @@ import { Loader } from './components/Loader';
 import { ViewTransition } from './components/ViewTransition';
 import { Splash } from './components/Splash';
 import { SuperAdminPage } from './pages/SuperAdminPage';
+import { LocationPicker, EMPTY_LOCATION } from './components/LocationPicker';
 import { SanctionsPage } from './pages/SanctionsPage';
 import { QrAccessPage } from './pages/QrAccessPage';
 import { QrValidatePage } from './pages/QrValidatePage';
@@ -1286,9 +1287,9 @@ function JoinCommunityPage() {
     const canCreate = user?.role === 'SUPER_ADMIN';
     const [createMode, setCreateMode] = useState(canCreate && (viewData?.createMode || false));
     const [newName, setNewName] = useState('');
-    const [newAddress, setNewAddress] = useState('');
-    const [newDistrict, setNewDistrict] = useState('');
-    const [newProvince, setNewProvince] = useState('');
+    // Ubicación vía mapa + selects en cascada (LocationPicker): evita errores
+    // de digitación en dirección/distrito/provincia y guarda lat/lng.
+    const [newLoc, setNewLoc] = useState(EMPTY_LOCATION);
     const [newType, setNewType] = useState<'EDIFICIO' | 'CONDOMINIO' | 'MULTIFAMILIAR'>('EDIFICIO');
     // Tower config fields (create mode)
     const [numBuildings, setNumBuildings] = useState(1);
@@ -1355,15 +1356,23 @@ function JoinCommunityPage() {
         setLoading(false);
     };
 
+    const locationComplete = !!newLoc.address.trim() && !!newLoc.district.trim() && !!newLoc.province.trim();
+
     const submitCreate = async () => {
         if (!newName.trim() || !user) return;
+        if (!locationComplete) {
+            toast('📍 Completa la ubicación: busca la dirección en el mapa y confirma distrito y provincia.');
+            return;
+        }
         setLoading(true);
         try {
             const community = await api.createCommunity({
                 name: newName.trim(),
-                address: newAddress.trim(),
-                district: newDistrict.trim() || undefined,
-                province: newProvince.trim() || undefined,
+                address: newLoc.address.trim(),
+                district: newLoc.district.trim(),
+                province: newLoc.province.trim(),
+                map_lat: newLoc.lat,
+                map_lng: newLoc.lng,
                 community_type: newType,
                 admin_email: user.email,
                 num_buildings: numBuildings,
@@ -1493,18 +1502,8 @@ function JoinCommunityPage() {
                     <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Nombre</label>
                     <input className="input stagger-item" placeholder="Ej: Jardines de Sta Beatriz" value={newName} onChange={e => setNewName(e.target.value)} style={{ marginBottom: 12 }} />
 
-                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Dirección</label>
-                    <input className="input stagger-item" placeholder="Ej: Av. Principal #123" value={newAddress} onChange={e => setNewAddress(e.target.value)} style={{ marginBottom: 12 }} />
-
-                    <div className="stagger-item" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                        <div>
-                            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Distrito</label>
-                            <input className="input" placeholder="Ej: Cercado de Lima" value={newDistrict} onChange={e => setNewDistrict(e.target.value)} />
-                        </div>
-                        <div>
-                            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Provincia</label>
-                            <input className="input" placeholder="Ej: Lima" value={newProvince} onChange={e => setNewProvince(e.target.value)} />
-                        </div>
+                    <div className="stagger-item">
+                        <LocationPicker value={newLoc} onChange={setNewLoc} />
                     </div>
 
                     {/* Tower structure config */}
@@ -1566,9 +1565,14 @@ function JoinCommunityPage() {
                     </div>
                     <p style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: 16 }}>Número de depto asignado: <strong>{adminApartment}</strong></p>
 
-                    <button className="btn btn-primary btn-full" onClick={submitCreate} disabled={!newName.trim() || loading}>
+                    <button className="btn btn-primary btn-full" onClick={submitCreate} disabled={!newName.trim() || !locationComplete || loading}>
                         {loading ? 'Creando...' : 'Crear torre y ser admin'}
                     </button>
+                    {!locationComplete && (
+                        <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 8, textAlign: 'center' }}>
+                            📍 Falta la ubicación: busca la dirección en el mapa y confirma distrito y provincia.
+                        </p>
+                    )}
                 </>
             )}
         </div>
