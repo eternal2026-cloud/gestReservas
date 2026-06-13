@@ -607,7 +607,9 @@ function HomePage() {
                     </p>
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
                         <button className="btn btn-primary" onClick={() => go('join-community')}>Unirme a una torre</button>
-                        {user?.role === 'SUPER_ADMIN' && (
+                        {/* Crear torre: solo admins (que aún no administran una) y el super admin.
+                            Estamos en la rama !hasCommunity, así que un ADMIN aquí no tiene comunidad todavía. */}
+                        {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
                             <button className="btn btn-ghost" onClick={() => go('join-community', { createMode: true })}>Crear torre nueva</button>
                         )}
                     </div>
@@ -1283,8 +1285,17 @@ function JoinCommunityPage() {
     // si alguien tenía Torre A 101 (falso positivo), o NO bloqueaba si solo había sol. pendientes.
     const [occupiedMap, setOccupiedMap] = useState<Record<string, 'ocupado' | 'pendiente'>>({});
     const [loading, setLoading] = useState(false);
-    // Solo SUPER_ADMIN puede crear torres nuevas; los demás siempre llegan en modo "unirse"
-    const canCreate = user?.role === 'SUPER_ADMIN';
+    // Quién puede crear torres:
+    //  - SUPER_ADMIN: siempre (es el dueño de la plataforma y asigna admins).
+    //  - ADMIN: solo si aún NO administra una comunidad. Al crear se vuelve el
+    //    admin de esa torre, y la regla es "un solo admin por torre/condominio".
+    //    Si ya tiene comunidad, crear otra la dejaría sin admin → se bloquea.
+    //  - USER: nunca; solo puede unirse. El Super Admin debe activarlo como
+    //    ADMIN primero (panel Super Admin → cambiar rol).
+    const isAdmin = user?.role === 'ADMIN';
+    const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+    const alreadyRunsCommunity = isAdmin && !!user?.community_id;
+    const canCreate = isSuperAdmin || (isAdmin && !alreadyRunsCommunity);
     const [createMode, setCreateMode] = useState(canCreate && (viewData?.createMode || false));
     const [newName, setNewName] = useState('');
     // Ubicación vía mapa + selects en cascada (LocationPicker): evita errores
@@ -1360,6 +1371,16 @@ function JoinCommunityPage() {
 
     const submitCreate = async () => {
         if (!newName.trim() || !user) return;
+        // Defensa en servidor-lado-cliente: aunque la UI ya oculta el modo crear,
+        // revalidamos el rol y la regla de "un admin por torre" antes de pegarle a la API.
+        if (!isAdmin && !isSuperAdmin) {
+            toast('🔒 Solo un administrador puede crear torres. Pide al Super Admin que te active como administrador.');
+            return;
+        }
+        if (alreadyRunsCommunity) {
+            toast('🏢 Ya eres administrador de una comunidad. Solo puede haber un admin por torre.');
+            return;
+        }
         if (!locationComplete) {
             toast('📍 Completa la ubicación: busca la dirección en el mapa y confirma distrito y provincia.');
             return;

@@ -283,7 +283,7 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                             </table>
                         </div>
                         <p className="sa-row" style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>
-                            Tip: el cambio de rol y estado es inmediato. Para promover a Administrador, asegúrate de que el usuario ya tenga comunidad asignada.
+                            Tip: el cambio de rol y estado es inmediato. Al promover a un usuario a Administrador podrá crear su torre/condominio (será su único admin); si ya administra una comunidad, primero debe cederla.
                         </p>
                     </>
                 )}
