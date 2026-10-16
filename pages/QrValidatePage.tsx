@@ -191,20 +191,20 @@ export function QrValidatePage({ user, onBack, onToast }: QrValidatePageProps) {
             p = JSON.parse(raw);
         } catch {
             setBusy(false);
-            showResult({ level: 'error', title: 'QR no reconocido', detail: 'No es un acceso de Roomly.' });
+            showResult({ level: 'error', title: 'QR no reconocido', detail: 'No es un acceso de Salas ADR.' });
             return;
         }
 
         if (!p || !p.kind || !p.community_id) {
             setBusy(false);
-            showResult({ level: 'error', title: 'QR no válido', detail: 'No es un acceso de Roomly.' });
+            showResult({ level: 'error', title: 'QR no válido', detail: 'No es un acceso de Salas ADR.' });
             return;
         }
 
         // 1) Misma comunidad que el admin
         if (p.community_id !== user.community_id) {
             setBusy(false);
-            showResult({ level: 'error', title: 'Otra comunidad', detail: 'Este acceso no pertenece a tu comunidad.' });
+            showResult({ level: 'error', title: 'Otra sede', detail: 'Este acceso no pertenece a tu sede.' });
             return;
         }
 
@@ -215,8 +215,8 @@ export function QrValidatePage({ user, onBack, onToast }: QrValidatePageProps) {
             showResult({
                 level: 'error',
                 title: 'Acceso vencido',
-                detail: p.kind === 'GUEST' ? 'El pase de invitado ya caducó.' : 'El QR del propietario expiró, pídele que lo refresque.',
-                info: [{ label: 'Depto', value: p.apartment || '—' }],
+                detail: p.kind === 'GUEST' ? 'El pase de visitante ya caducó.' : 'El QR del colaborador expiró, pídele que lo refresque.',
+                info: [{ label: 'Área', value: p.apartment || '—' }],
             });
             return;
         }
@@ -226,9 +226,9 @@ export function QrValidatePage({ user, onBack, onToast }: QrValidatePageProps) {
             setBusy(false);
             showResult({
                 level: 'success',
-                title: 'Propietario válido',
+                title: 'Colaborador válido',
                 info: [
-                    { label: 'Depto', value: p.apartment || '—' },
+                    { label: 'Área', value: p.apartment || '—' },
                     { label: 'Vence en', value: p.exp ? fmtRemaining(p.exp) : '—' },
                 ],
             });
@@ -241,11 +241,11 @@ export function QrValidatePage({ user, onBack, onToast }: QrValidatePageProps) {
             setBusy(false);
             showResult({
                 level: 'warn',
-                title: 'Invitado válido (sin uso único)',
+                title: 'Visitante válido (sin uso único)',
                 detail: 'Este QR fue generado por una versión anterior y no admite control de un solo uso.',
                 info: [
-                    { label: 'Invitado', value: p.guestName || '—' },
-                    { label: 'Depto', value: p.apartment || '—' },
+                    { label: 'Visitante', value: p.guestName || '—' },
+                    { label: 'Área', value: p.apartment || '—' },
                 ],
             });
             return;
@@ -264,8 +264,8 @@ export function QrValidatePage({ user, onBack, onToast }: QrValidatePageProps) {
                     level: 'success',
                     title: 'Acceso permitido',
                     info: [
-                        { label: 'Invitado', value: p.guestName || '—' },
-                        { label: 'Depto', value: p.apartment || '—' },
+                        { label: 'Visitante', value: p.guestName || '—' },
+                        { label: 'Área', value: p.apartment || '—' },
                         { label: 'Vence en', value: p.exp ? fmtRemaining(p.exp) : '—' },
                     ],
                 });
@@ -273,14 +273,14 @@ export function QrValidatePage({ user, onBack, onToast }: QrValidatePageProps) {
                 showResult({
                     level: 'error',
                     title: 'Pase ya utilizado',
-                    detail: `Este invitado ya ingresó el ${fmtDate(res.used_at)}.`,
+                    detail: `Este visitante ya ingresó el ${fmtDate(res.used_at)}.`,
                     info: [
-                        { label: 'Invitado', value: res.guest_name || p.guestName || '—' },
-                        { label: 'Depto', value: res.apartment || p.apartment || '—' },
+                        { label: 'Visitante', value: res.guest_name || p.guestName || '—' },
+                        { label: 'Área', value: res.apartment || p.apartment || '—' },
                     ],
                 });
             } else {
-                showResult({ level: 'error', title: 'No autorizado', detail: 'No tienes permisos para validar en esta comunidad.' });
+                showResult({ level: 'error', title: 'No autorizado', detail: 'No tienes permisos para validar en esta sede.' });
             }
         } catch (e: any) {
             setBusy(false);
@@ -310,7 +310,7 @@ export function QrValidatePage({ user, onBack, onToast }: QrValidatePageProps) {
                 Validar acceso QR
             </h2>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 16 }}>
-                Escanea el QR de un vecino o invitado para verificar su acceso a <strong>{user.community?.name || 'tu comunidad'}</strong>.
+                Escanea el QR de un colaborador o visitante para verificar su acceso a <strong>{user.community?.name || 'tu sede'}</strong>.
             </p>
 
             {!supported && (

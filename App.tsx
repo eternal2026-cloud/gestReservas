@@ -11,7 +11,8 @@ import { LocationPicker, EMPTY_LOCATION } from './components/LocationPicker';
 import { SanctionsPage } from './pages/SanctionsPage';
 import { QrAccessPage } from './pages/QrAccessPage';
 import { QrValidatePage } from './pages/QrValidatePage';
-import { generateStructure, flatApartments, communityTypeLabel } from './services/structure';
+import { ADR_AREAS, ADR_CARGOS_SUGERIDOS, communityTypeLabel } from './services/structure';
+import { AdrMark, AdrLogo } from './components/AdrLogo';
 import anime from 'animejs';
 
 
@@ -46,7 +47,7 @@ export default function App() {
     const [splashDone, setSplashDone] = useState(false);
     const [user, setUser] = useState<User | null>(null);
     const [theme, setTheme] = useState<ThemeMode>(() =>
-        (localStorage.getItem('roomly-theme') as ThemeMode) || 'dark'
+        (localStorage.getItem('salas-adr-theme') as ThemeMode) || 'dark'
     );
     const [view, setView] = useState<AppView>('login');
     const [viewData, setViewData] = useState<any>(null);
@@ -56,7 +57,7 @@ export default function App() {
 
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('roomly-theme', theme);
+        localStorage.setItem('salas-adr-theme', theme);
     }, [theme]);
 
     // Check rejection messages when user logs in
@@ -127,7 +128,8 @@ export default function App() {
                                 profile = await api.createUserProfile({
                                     auth_id: authUser.id,
                                     email: authUser.email ?? '',
-                                    name: (authUser.email ?? '').split('@')[0],
+                                    name: authUser.user_metadata?.name || (authUser.email ?? '').split('@')[0],
+                                    cargo: authUser.user_metadata?.cargo || undefined,
                                     role: 'USER',
                                     points: 0,
                                     status: 'ACTIVO',
@@ -210,13 +212,7 @@ function TopBar() {
     return (
         <div className="top-bar">
             <div className="logo" style={{ cursor: 'pointer' }} onClick={() => go('home')}>
-                <svg width="38" height="38" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="40" height="40" rx="12" fill="#7C3AED" />
-                    <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M20 28V22" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                    <circle cx="20" cy="16" r="2" fill="white" />
-                </svg>
-                <span className="logo-text">Roomly</span>
+                <AdrLogo size={38} />
             </div>
             <div className="top-bar-actions">
                 <button className="icon-btn" onClick={toggleTheme}>
@@ -229,7 +225,7 @@ function TopBar() {
                 )}
                 {user?.role === 'SUPER_ADMIN' && (
                     <button className="icon-btn" onClick={() => go('super-admin')} title="Panel Super Admin"
-                        style={{ color: '#f59e0b' }}>
+                        style={{ color: 'var(--adr-naranja)' }}>
                         <span className="material-symbols-outlined">shield_person</span>
                     </button>
                 )}
@@ -244,9 +240,9 @@ function BottomNav() {
     const hasCommunity = !!user?.community_id;
     const items: { icon: string; label: string; view: AppView; needsCommunity?: boolean }[] = [
         { icon: 'home', label: 'Inicio', view: 'home' },
-        { icon: 'search', label: 'Espacios', view: 'amenities', needsCommunity: true },
+        { icon: 'meeting_room', label: 'Salas', view: 'amenities', needsCommunity: true },
         { icon: 'calendar_month', label: 'Reservas', view: 'my-reservations', needsCommunity: true },
-        { icon: 'groups', label: 'Comunidad', view: 'community' },
+        { icon: 'forum', label: 'Muro', view: 'community' },
         { icon: 'person', label: 'Perfil', view: 'profile' },
     ];
     return (
@@ -269,6 +265,7 @@ function LoginPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
+    const [cargo, setCargo] = useState('');
     const [isRegister, setIsRegister] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -365,9 +362,11 @@ function LoginPage() {
                     setLoading(false);
                     return;
                 }
+                // Nombre y cargo viajan como metadata: si Supabase exige confirmar
+                // el correo, el perfil se crea después (listener de auth) con ellos.
                 const { data, error: signUpErr } = await supabase.auth.signUp({
                     email, password,
-                    options: { emailRedirectTo: SITE_URL },
+                    options: { emailRedirectTo: SITE_URL, data: { name: name.trim(), cargo: cargo.trim() } },
                 });
                 if (signUpErr) throw signUpErr;
                 if (data?.user && data.user.identities?.length === 0) {
@@ -382,7 +381,7 @@ function LoginPage() {
                 }
                 if (data?.user) {
                     const profile = await api.createUserProfile({
-                        auth_id: data.user.id, email, name: name || email.split('@')[0], role: 'USER', points: 0, status: 'ACTIVO'
+                        auth_id: data.user.id, email, name: name || email.split('@')[0], cargo: cargo.trim() || undefined, role: 'USER', points: 0, status: 'ACTIVO'
                     });
                     setUser(profile);
                     go('home');
@@ -395,7 +394,9 @@ function LoginPage() {
                     if (!profile) profile = await api.getUserByEmail(email);
                     if (!profile) {
                         profile = await api.createUserProfile({
-                            auth_id: data.user.id, email, name: email.split('@')[0],
+                            auth_id: data.user.id, email,
+                            name: data.user.user_metadata?.name || email.split('@')[0],
+                            cargo: data.user.user_metadata?.cargo || undefined,
                             role: 'USER', points: 0, status: 'ACTIVO'
                         });
                     }
@@ -439,17 +440,13 @@ function LoginPage() {
             <div className="login-bg-orb login-bg-orb-2" />
             <div className="login-card">
                 <div className="login-logo">
-                    <svg viewBox="0 0 40 40" fill="none">
-                        <rect width="40" height="40" rx="12" fill="#7C3AED" />
-                        <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                        <circle cx="20" cy="16" r="2" fill="white" />
-                    </svg>
+                    <AdrMark size={96} />
                     <h1>Recuperar clave</h1>
                     <p>Te enviaremos un enlace a tu correo</p>
                 </div>
                 {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>{error}</div>}
                 <form className="login-form" onSubmit={handleRecovery}>
-                    <div><label>Correo electrónico</label><input className="input" type="email" placeholder="tu@email.com" value={recoveryEmail} onChange={e => setRecoveryEmail(e.target.value)} required /></div>
+                    <div><label>Correo electrónico</label><input className="input" type="email" placeholder="tu.correo@empresa.com" value={recoveryEmail} onChange={e => setRecoveryEmail(e.target.value)} required /></div>
                     <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
                         {loading ? 'Enviando…' : 'Enviar enlace'}
                     </button>
@@ -465,32 +462,25 @@ function LoginPage() {
         <div className="login-container" ref={cardRef}>
             <div className="login-bg-orb login-bg-orb-1" />
             <div className="login-bg-orb login-bg-orb-2" />
-            <div className="tower-animation" style={{ pointerEvents: 'none' }}>
-                {Array.from({ length: 18 }).map((_, i) => (
-                    <div key={i} className="tower-floor" style={{
-                        width: `${60 + ((i * 37) % 40)}%`, margin: '0 auto',
-                        opacity: 0,
-                        animation: 'none',
-                    }} />
-                ))}
-            </div>
             <div className="login-card">
                 <div className="login-logo">
-                    <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect width="40" height="40" rx="12" fill="#7C3AED" />
-                        <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                        <path d="M20 28V22" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                        <circle cx="20" cy="16" r="2" fill="white" />
-                    </svg>
-                    <h1>Roomly</h1>
-                    <p>Tu comunidad, conectada</p>
+                    <AdrMark size={96} />
+                    <h1>Salas ADR</h1>
+                    <p>Reserva de salas de reunión · Agrícola Don Ricardo</p>
                 </div>
                 {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>{error}</div>}
                 <form className="login-form" onSubmit={handleSubmit}>
                     {isRegister && (
-                        <div><label>Nombre</label><input className="input" placeholder="Tu nombre" value={name} onChange={e => setName(e.target.value)} required /></div>
+                        <div><label>Nombres y apellidos</label><input className="input" placeholder="Tu nombre completo" value={name} onChange={e => setName(e.target.value)} required /></div>
                     )}
-                    <div><label>Correo electrónico</label><input className="input" type="email" placeholder="tu@email.com" value={email} onChange={e => setEmail(e.target.value)} required /></div>
+                    {isRegister && (
+                        <div>
+                            <label>Cargo</label>
+                            <input className="input" list="adr-cargos" placeholder="Ej: Supervisor de Calidad" value={cargo} onChange={e => setCargo(e.target.value)} maxLength={80} required />
+                            <datalist id="adr-cargos">{ADR_CARGOS_SUGERIDOS.map(c => <option key={c} value={c} />)}</datalist>
+                        </div>
+                    )}
+                    <div><label>Correo electrónico</label><input className="input" type="email" placeholder="tu.correo@empresa.com" value={email} onChange={e => setEmail(e.target.value)} required /></div>
                     <div>
                         <label>Contraseña</label>
                         <input className="input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required />
@@ -551,11 +541,7 @@ function ResetPasswordPage({ recoveryMode }: { recoveryMode: React.MutableRefObj
             <div className="login-bg-orb login-bg-orb-2" />
             <div className="login-card">
                 <div className="login-logo">
-                    <svg viewBox="0 0 40 40" fill="none">
-                        <rect width="40" height="40" rx="12" fill="#7C3AED" />
-                        <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                        <circle cx="20" cy="16" r="2" fill="white" />
-                    </svg>
+                    <AdrMark size={96} />
                     <h1>Nueva clave</h1>
                     <p>Escribe tu nueva contraseña</p>
                 </div>
@@ -591,7 +577,12 @@ function HomePage() {
         <div className="fade-in">
             <div style={{ marginBottom: 24 }}>
                 <p style={{ color: 'var(--text-2)', fontSize: 14 }}>Bienvenido,</p>
-                <h2 style={{ fontSize: 26, fontWeight: 800 }}>{user?.name || 'Vecino'}</h2>
+                <h2 style={{ fontSize: 26, fontWeight: 800 }}>{user?.name || 'Colaborador'}</h2>
+                {(user?.cargo || user?.apartment) && (
+                    <p style={{ color: 'var(--text-3)', fontSize: 13, marginTop: 2 }}>
+                        {[user?.cargo, user?.apartment, user?.community?.name].filter(Boolean).join(' · ')}
+                    </p>
+                )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
                     <span className="badge badge-primary">{level.icon} {level.name}</span>
                     <span className="badge badge-accent">{user?.points || 0} pts</span>
@@ -600,17 +591,17 @@ function HomePage() {
 
             {!hasCommunity ? (
                 <div className="card" style={{ textAlign: 'center', padding: 32 }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--primary-light)' }}>apartment</span>
-                    <h3 style={{ margin: '12px 0 8px' }}>Únete a tu torre</h3>
+                    <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--primary-light)' }}>domain</span>
+                    <h3 style={{ margin: '12px 0 8px' }}>Afíliate a tu sede</h3>
                     <p style={{ color: 'var(--text-2)', fontSize: 14, marginBottom: 16 }}>
-                        Para reservar espacios, ver la comunidad y ganar puntos, primero debes unirte a una torre o comunidad ya registrada.
+                        Para reservar salas de reunión primero debes afiliarte a tu sede ADR indicando tu área y cargo. El administrador aprobará tu solicitud.
                     </p>
                     <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-                        <button className="btn btn-primary" onClick={() => go('join-community')}>Unirme a una torre</button>
-                        {/* Crear torre: solo admins (que aún no administran una) y el super admin.
-                            Estamos en la rama !hasCommunity, así que un ADMIN aquí no tiene comunidad todavía. */}
+                        <button className="btn btn-primary" onClick={() => go('join-community')}>Afiliarme a una sede</button>
+                        {/* Registrar sede: solo admins (que aún no administran una) y el super admin.
+                            Estamos en la rama !hasCommunity, así que un ADMIN aquí no tiene sede todavía. */}
                         {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-                            <button className="btn btn-ghost" onClick={() => go('join-community', { createMode: true })}>Crear torre nueva</button>
+                            <button className="btn btn-ghost" onClick={() => go('join-community', { createMode: true })}>Registrar sede nueva</button>
                         )}
                     </div>
                 </div>
@@ -621,7 +612,7 @@ function HomePage() {
                         <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('amenities')}>
                             <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--primary-light)' }}>add_circle</span>
                             <h4 style={{ fontSize: 14, marginTop: 8 }}>Reservar</h4>
-                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Espacios</p>
+                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Salas</p>
                         </div>
                         <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('qr-access')}>
                             <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--accent)' }}>qr_code_2</span>
@@ -629,24 +620,24 @@ function HomePage() {
                             <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Acceso</p>
                         </div>
                         <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('leaderboard')}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 32, color: '#f59e0b' }}>leaderboard</span>
+                            <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--adr-naranja)' }}>leaderboard</span>
                             <h4 style={{ fontSize: 14, marginTop: 8 }}>Ranking</h4>
-                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Top vecinos</p>
+                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Top colaboradores</p>
                         </div>
                         {user?.role === 'ADMIN' && (
                             <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center', border: '1px solid var(--primary-light)', gridColumn: '1 / -1' }} onClick={() => go('admin')}>
-                                <span className="material-symbols-outlined" style={{ fontSize: 32, color: '#f59e0b' }}>admin_panel_settings</span>
+                                <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--adr-naranja)' }}>admin_panel_settings</span>
                                 <h4 style={{ fontSize: 14, marginTop: 8 }}>Panel Admin</h4>
-                                <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Sanciones, reglas, solicitudes y más</p>
+                                <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Salas, solicitudes, sanciones y más</p>
                             </div>
                         )}
                     </div>
 
                     {/* Active reservations */}
-                    <div className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>event</span> Próximas Reservas</div>
+                    <div className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>event</span> Próximas reuniones</div>
                     {reservations.length === 0 ? (
                         <div className="card" style={{ textAlign: 'center', padding: 24, color: 'var(--text-3)' }}>
-                            <p>No tienes reservas activas</p>
+                            <p>No tienes reuniones programadas</p>
                             <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} onClick={() => go('amenities')}>Reservar ahora</button>
                         </div>
                     ) : reservations.map(r => (
@@ -655,19 +646,20 @@ function HomePage() {
                                 <span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>calendar_today</span>
                             </div>
                             <div style={{ flex: 1 }}>
-                                <h4 style={{ fontSize: 14, fontWeight: 600 }}>{r.amenity?.name || 'Espacio'}</h4>
+                                <h4 style={{ fontSize: 14, fontWeight: 600 }}>{r.amenity?.name || 'Sala'}</h4>
                                 <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.date} • {r.time_slot}</p>
+                                {r.motivo && <p style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>📝 {r.motivo}</p>}
                             </div>
                             <span className="badge badge-accent">Activa</span>
                         </div>
                     ))}
 
                     {/* Spaces preview */}
-                    <div className="section-title" style={{ marginTop: 24 }}><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>location_on</span> Espacios Disponibles</div>
+                    <div className="section-title" style={{ marginTop: 24 }}><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>location_on</span> Salas disponibles</div>
                     <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
                         {amenities.slice(0, 4).map(a => (
                             <div key={a.id} style={{ minWidth: 160, cursor: 'pointer' }} onClick={() => go('amenity-detail', a)}>
-                                <img src={a.image_url || 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=400'} alt={a.name}
+                                <img src={a.image_url || 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=400'} alt={a.name}
                                     style={{ width: 160, height: 100, objectFit: 'cover', borderRadius: 12 }} />
                                 <h4 style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>{a.name}</h4>
                                 <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Cap: {a.capacity}</p>
@@ -692,11 +684,11 @@ function AmenitiesPage() {
 
     return (
         <div className="fade-in">
-            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>search</span> Espacios Comunes</h2>
+            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>meeting_room</span> Salas de reunión</h2>
             {loading ? Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 240, marginBottom: 16 }} />) :
                 amenities.map(a => (
                     <div key={a.id} className="amenity-card stagger-item" onClick={() => go('amenity-detail', a)}>
-                        <img className="amenity-card-img" src={a.image_url || 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800'} alt={a.name} />
+                        <img className="amenity-card-img" src={a.image_url || 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=800'} alt={a.name} />
                         <div className="amenity-card-body">
                             <h3>{a.name}</h3>
                             <p>{a.description}</p>
@@ -715,13 +707,13 @@ function AmenitiesPage() {
 // ─── AmenityDetailPage ───
 function AmenityDetailPage() {
     const { viewData: amenity, go } = useApp();
-    if (!amenity) return <div className="empty-state"><p>Selecciona un espacio</p></div>;
+    if (!amenity) return <div className="empty-state"><p>Selecciona una sala</p></div>;
     return (
         <div className="fade-in">
             <button className="btn btn-ghost btn-sm" onClick={() => go('amenities')} style={{ marginBottom: 12 }}>
                 <span className="material-symbols-outlined">arrow_back</span> Volver
             </button>
-            <img src={amenity.image_url || ''} alt={amenity.name} style={{ width: '100%', height: 220, objectFit: 'cover', borderRadius: 16, marginBottom: 16 }} />
+            <img src={amenity.image_url || 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=800'} alt={amenity.name} style={{ width: '100%', height: 220, objectFit: 'cover', borderRadius: 16, marginBottom: 16 }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span className="badge badge-accent">Disponible</span>
             </div>
@@ -762,10 +754,12 @@ function BookingPage() {
 
     const [date, setDate] = useState(todayPeru);
     const [slot, setSlot] = useState('');
+    const [motivo, setMotivo] = useState('');
+    const [attendees, setAttendees] = useState('');
     const [booked, setBooked] = useState<string[]>([]);
     const [loading, setLoading] = useState(false);
     const [eligibility, setEligibility] = useState<api.Eligibility | null>(null);
-    const allSlots = ['08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00', '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00', '19:00-20:00'];
+    const allSlots = ['07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00', '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00', '19:00-20:00'];
 
     // Slots whose start hour is already past (only relevant if date = today)
     const isPastSlot = (s: string) => {
@@ -788,26 +782,20 @@ function BookingPage() {
 
     const dateBlocked = eligibility?.blockedDates.includes(date) || false;
 
+    const attendeesNum = parseInt(attendees, 10);
+    const overCapacity = !!amenity && attendeesNum > (amenity.capacity || 0);
+
     const handleBook = async () => {
         if (!slot || !user || !amenity) return;
+        if (!motivo.trim()) { toast('📝 Indica el motivo de la reunión'); return; }
+        if (overCapacity) { toast(`⚠️ La sala admite máximo ${amenity.capacity} personas`); return; }
         setLoading(true);
         try {
-            // Pool restriction: max 1 reservation every 15 days
-            if (amenity.name.toLowerCase().includes('piscina')) {
-                const userRes = await api.getUserReservations(user.id);
-                const poolRes = userRes.filter(r => r.amenity?.name?.toLowerCase().includes('piscina') && r.status === 'ACTIVA');
-                const now = new Date();
-                const recentPool = poolRes.find(r => {
-                    const diff = (now.getTime() - new Date(r.created_at).getTime()) / (1000 * 60 * 60 * 24);
-                    return diff < 15;
-                });
-                if (recentPool) {
-                    toast('⚠️ Solo puedes reservar la piscina 1 vez cada 15 días');
-                    setLoading(false);
-                    return;
-                }
-            }
-            const created = await api.createReservation({ user_id: user.id, amenity_id: amenity.id, date, time_slot: slot });
+            const created = await api.createReservation({
+                user_id: user.id, amenity_id: amenity.id, date, time_slot: slot,
+                motivo: motivo.trim(),
+                attendees: attendeesNum > 0 ? attendeesNum : undefined,
+            });
             // Los puntos se otorgan cuando el admin marca la reserva como CUMPLIDA en
             // Auditoría — antes los dábamos en este punto, lo que falseaba los rankings.
             toast(`✅ Reserva ${created.code || 'confirmada'} · ${amenity.name}`);
@@ -816,7 +804,7 @@ function BookingPage() {
         setLoading(false);
     };
 
-    if (!amenity) return <div className="empty-state"><p>Selecciona un espacio primero</p></div>;
+    if (!amenity) return <div className="empty-state"><p>Selecciona una sala primero</p></div>;
     return (
         <div className="fade-in">
             <button className="btn btn-ghost btn-sm" onClick={() => go('amenity-detail', amenity)} style={{ marginBottom: 12 }}>
@@ -867,19 +855,33 @@ function BookingPage() {
                     );
                 })}
             </div>
+            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Motivo de la reunión *</label>
+            <textarea className="input" rows={2} maxLength={200}
+                placeholder="Ej: Revisión semanal de indicadores de Calidad"
+                value={motivo} onChange={e => setMotivo(e.target.value)} style={{ marginBottom: 4 }} />
+            <p style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'right', marginBottom: 12 }}>{motivo.length}/200</p>
+            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>N.º de asistentes (opcional)</label>
+            <input className="input" type="number" min={1} max={amenity.capacity || undefined} inputMode="numeric"
+                placeholder={`Máximo ${amenity.capacity}`} value={attendees}
+                onChange={e => setAttendees(e.target.value)} style={{ marginBottom: overCapacity ? 6 : 20 }} />
+            {overCapacity && (
+                <p style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 20 }}>La sala admite máximo {amenity.capacity} personas.</p>
+            )}
             {slot && (
                 <div className="card" style={{ marginBottom: 16 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Resumen</h4>
                     <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📍 {amenity.name}</p>
                     <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📅 {date}</p>
                     <p style={{ fontSize: 13, color: 'var(--text-2)' }}>🕐 {slot}</p>
-                    <p style={{ fontSize: 13, color: 'var(--accent)', marginTop: 4 }}>+{amenity.points_reward || 10} puntos</p>
+                    {motivo.trim() && <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📝 {motivo.trim()}</p>}
+                    {attendeesNum > 0 && <p style={{ fontSize: 13, color: 'var(--text-2)' }}>👥 {attendeesNum} asistentes</p>}
+                    <p style={{ fontSize: 13, color: 'var(--accent)', marginTop: 4 }}>+{amenity.points_reward || 10} puntos al cumplir la reunión</p>
                     <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6, fontFamily: 'monospace' }}>
                         Recibirás un código correlativo C1-Rxxxx al confirmar.
                     </p>
                 </div>
             )}
-            <button className="btn btn-primary btn-full" disabled={!slot || loading || dateBlocked} onClick={handleBook}>
+            <button className="btn btn-primary btn-full" disabled={!slot || !motivo.trim() || overCapacity || loading || dateBlocked} onClick={handleBook}>
                 {loading ? 'Reservando…' : dateBlocked ? 'Fecha bloqueada' : 'Confirmar Reserva'}
             </button>
         </div>
@@ -909,10 +911,11 @@ function MyReservationsPage() {
             {filtered.length === 0 ? <div className="empty-state"><span className="material-symbols-outlined">event_busy</span><p>No hay reservas</p></div> :
                 filtered.map(r => (
                     <div key={r.id} className="card stagger-item" style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <img src={r.amenity?.image_url || ''} alt="" style={{ width: 60, height: 60, borderRadius: 10, objectFit: 'cover' }} />
+                        <img src={r.amenity?.image_url || 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=200'} alt="" style={{ width: 60, height: 60, borderRadius: 10, objectFit: 'cover' }} />
                         <div style={{ flex: 1 }}>
                             <h4 style={{ fontSize: 14, fontWeight: 600 }}>{r.amenity?.name}</h4>
-                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.date} • {r.time_slot}</p>
+                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.date} • {r.time_slot}{r.attendees ? ` • 👥 ${r.attendees}` : ''}</p>
+                            {r.motivo && <p style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>📝 {r.motivo}</p>}
                             {r.code && (
                                 <p style={{ fontSize: 10, color: 'var(--primary-light)', fontFamily: 'monospace', marginTop: 2 }}>
                                     {r.code}
@@ -952,10 +955,10 @@ function CommunityPage() {
 
     if (!user?.community_id) return (
         <div className="empty-state fade-in">
-            <span className="material-symbols-outlined">groups</span>
-            <h3>No perteneces a una comunidad</h3>
-            <p style={{ margin: '8px 0' }}>Únete a una torre para ver espacios, reservar y participar</p>
-            <button className="btn btn-primary" onClick={() => go('join-community')}>Unirme a una torre</button>
+            <span className="material-symbols-outlined">domain</span>
+            <h3>Aún no estás afiliado a una sede</h3>
+            <p style={{ margin: '8px 0' }}>Afíliate a tu sede ADR para ver las salas, reservar y participar en el muro</p>
+            <button className="btn btn-primary" onClick={() => go('join-community')}>Afiliarme a una sede</button>
         </div>
     );
 
@@ -970,7 +973,7 @@ function CommunityPage() {
             const post = await api.createPost({ user_id: user.id, community_id: user.community_id, text, post_type: type, image_url: imageUrl });
             setPosts([post, ...posts]);
             const pts = type === 'FOTO_AREA' ? 15 : type === 'BUG_REPORT' ? 25 : 5;
-            await api.awardPoints(user.id, user.community_id!, type === 'BUG_REPORT' ? 'BUG_REPORT' : type === 'FOTO_AREA' ? 'UPLOAD_AREA_PHOTO' : 'COMMENT', pts, type === 'FOTO_AREA' ? 'Foto de área común subida' : undefined);
+            await api.awardPoints(user.id, user.community_id!, type === 'BUG_REPORT' ? 'BUG_REPORT' : type === 'FOTO_AREA' ? 'UPLOAD_AREA_PHOTO' : 'COMMENT', pts, type === 'FOTO_AREA' ? 'Foto de sala subida' : undefined);
             await refreshUser();
             setText('');
             setPostImage(null);
@@ -1008,9 +1011,9 @@ function CommunityPage() {
 
     return (
         <div className="fade-in">
-            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>groups</span> Comunidad</h2>
+            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>forum</span> Muro ADR</h2>
             <div className="card" style={{ marginBottom: 16 }}>
-                <textarea className="input" placeholder="¿Qué hay de nuevo en la torre?" value={text} onChange={e => setText(e.target.value)} rows={2} />
+                <textarea className="input" placeholder="Comparte un aviso con tu sede (salas, equipos, novedades)…" value={text} onChange={e => setText(e.target.value)} rows={2} />
                 {postImage && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, padding: '4px 8px', background: 'var(--bg-3)', borderRadius: 8, fontSize: 12 }}>
                         📷 {postImage.name.slice(0, 20)}
@@ -1031,7 +1034,7 @@ function CommunityPage() {
                     <div className="post-header">
                         <div className="avatar">{p.user?.avatar_url ? <img src={p.user.avatar_url} alt="" /> : (p.user?.name?.[0] || '?')}</div>
                         <div className="post-header-info">
-                            <h4>{p.user?.name || 'Vecino'}</h4>
+                            <h4>{p.user?.name || 'Colaborador'}</h4>
                             <span>{timeAgo(p.created_at)} {p.post_type === 'BUG_REPORT' && '• 🐛 Bug Report'}</span>
                         </div>
                     </div>
@@ -1082,8 +1085,8 @@ function LeaderboardPage() {
         <div className="fade-in">
             <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>leaderboard</span> Clasificación</h2>
             <div className="leaderboard-tabs">
-                <button className={`leaderboard-tab ${tab === 'towers' ? 'active' : ''}`} onClick={() => setTab('towers')}>🏢 Torres</button>
-                <button className={`leaderboard-tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>👥 Mi Torre</button>
+                <button className={`leaderboard-tab ${tab === 'towers' ? 'active' : ''}`} onClick={() => setTab('towers')}>🏢 Sedes</button>
+                <button className={`leaderboard-tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>👥 Mi sede</button>
             </div>
             {tab === 'towers' ? communities.map((c, i) => (
                 <div key={c.id} className="leaderboard-item stagger-item">
@@ -1121,7 +1124,8 @@ function ProfilePage() {
     const [showCartilla, setShowCartilla] = useState(false);
     const [dni, setDni] = useState(user?.dni || '');
     const [phone, setPhone] = useState(user?.phone || '');
-    const cartillaComplete = !!(user?.dni && user?.phone);
+    const [cargoEdit, setCargoEdit] = useState(user?.cargo || '');
+    const cartillaComplete = !!(user?.dni && user?.phone && user?.cargo);
 
     const saveCartilla = async () => {
         if (!user) return;
@@ -1135,7 +1139,7 @@ function ProfilePage() {
             return;
         }
         try {
-            const updated = await api.updateUserProfile(user.id, { dni: dni || undefined, phone: phone || undefined });
+            const updated = await api.updateUserProfile(user.id, { dni: dni || undefined, phone: phone || undefined, cargo: cargoEdit.trim() || undefined });
             setUser(updated);
             setShowCartilla(false);
             toast('✅ Datos actualizados');
@@ -1213,8 +1217,8 @@ function ProfilePage() {
                 <div style={{ marginTop: 8 }}><span className="badge badge-primary">{level.icon} {level.name}</span></div>
                 <div className="profile-stats">
                     <div className="profile-stat"><div className="profile-stat-value">{user?.points || 0}</div><div className="profile-stat-label">Puntos</div></div>
-                    <div className="profile-stat"><div className="profile-stat-value">{user?.tower || '-'}</div><div className="profile-stat-label">Torre</div></div>
-                    <div className="profile-stat"><div className="profile-stat-value">{user?.apartment || '-'}</div><div className="profile-stat-label">Depto</div></div>
+                    <div className="profile-stat"><div className="profile-stat-value" style={{ fontSize: 14 }}>{user?.apartment || '-'}</div><div className="profile-stat-label">Área</div></div>
+                    <div className="profile-stat"><div className="profile-stat-value" style={{ fontSize: 14 }}>{user?.cargo || '-'}</div><div className="profile-stat-label">Cargo</div></div>
                 </div>
             </div>
 
@@ -1223,10 +1227,10 @@ function ProfilePage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showCartilla ? 12 : 0 }}>
                     <div>
                         <h4 style={{ fontSize: 14, fontWeight: 700 }}>
-                            {cartillaComplete ? '✅ Cartilla completa' : '📝 Completa tu cartilla'}
+                            {cartillaComplete ? '✅ Ficha completa' : '📝 Completa tu ficha'}
                         </h4>
                         <p style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                            {cartillaComplete ? 'Datos verificados para reservar' : 'DNI y celular para verificación'}
+                            {cartillaComplete ? 'Datos del colaborador registrados' : 'Cargo, DNI y celular del colaborador'}
                         </p>
                     </div>
                     <button className="btn btn-sm btn-ghost" onClick={() => setShowCartilla(!showCartilla)}>
@@ -1235,6 +1239,11 @@ function ProfilePage() {
                 </div>
                 {showCartilla && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <label style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4, display: 'block' }}>Cargo</label>
+                            <input className="input" list="adr-cargos-perfil" placeholder="Ej: Analista de Mejora Continua" value={cargoEdit} onChange={e => setCargoEdit(e.target.value)} maxLength={80} />
+                            <datalist id="adr-cargos-perfil">{ADR_CARGOS_SUGERIDOS.map(c => <option key={c} value={c} />)}</datalist>
+                        </div>
                         <div>
                             <label style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4, display: 'block' }}>DNI</label>
                             <input className="input" placeholder="12345678" value={dni} onChange={e => setDni(e.target.value)} inputMode="numeric" maxLength={12} />
@@ -1243,7 +1252,7 @@ function ProfilePage() {
                             <label style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4, display: 'block' }}>Celular</label>
                             <input className="input" placeholder="+51 999 999 999" value={phone} onChange={e => setPhone(e.target.value)} inputMode="tel" maxLength={20} />
                         </div>
-                        <button className="btn btn-primary btn-sm" style={{ gridColumn: '1 / -1' }} onClick={saveCartilla}>Guardar cartilla</button>
+                        <button className="btn btn-primary btn-sm" style={{ gridColumn: '1 / -1' }} onClick={saveCartilla}>Guardar ficha</button>
                     </div>
                 )}
             </div>
@@ -1258,39 +1267,28 @@ function ProfilePage() {
                 ))
             }
             <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {!user?.community_id && <button className="btn btn-primary btn-full" onClick={() => go('join-community')}>Unirme a una torre</button>}
+                {!user?.community_id && <button className="btn btn-primary btn-full" onClick={() => go('join-community')}>Afiliarme a una sede</button>}
                 <button className="btn btn-danger btn-full" onClick={logout}>Cerrar sesión</button>
             </div>
         </div>
     );
 }
 
-// ─── JoinCommunityPage ───
+// ─── JoinCommunityPage (Afiliación a sede ADR) ───
 function JoinCommunityPage() {
     const { user, setUser, go, toast, viewData } = useApp();
     const [communities, setCommunities] = useState<Community[]>([]);
     const [selected, setSelected] = useState('');
-    // Bloque / Torre se elige con 2 dropdowns: tipo + letra → evita duplicidad por digitación
-    const [towerKind, setTowerKind] = useState<'Torre' | 'Bloque'>('Torre');
-    const [towerLetter, setTowerLetter] = useState('');
-    // Si la comunidad tiene un solo edificio no se muestra el picker; en ese caso
-    // usamos "Torre A" para que coincida con el dato que el admin guarda por defecto
-    // y no se cuelen duplicados por mismatch entre "" y "Torre A".
-    const _selectedForTower = communities.find(c => c.id === selected);
-    const singleBuilding = !!_selectedForTower && (_selectedForTower.num_buildings || 1) <= 1;
-    const tower = singleBuilding ? 'Torre A' : (towerLetter ? `${towerKind} ${towerLetter}` : '');
-    const [unit, setUnit] = useState('');
-    // Mapa { 'TorreA|101': 'ocupado' | 'pendiente' } para anular dptos por torre.
-    // Antes solo guardábamos un array global de dptos: bloqueaba 101 en TODAS las torres
-    // si alguien tenía Torre A 101 (falso positivo), o NO bloqueaba si solo había sol. pendientes.
-    const [occupiedMap, setOccupiedMap] = useState<Record<string, 'ocupado' | 'pendiente'>>({});
+    // Área y cargo del colaborador: el área se elige de una lista para evitar
+    // duplicidad por digitación (las sanciones se aplican por área).
+    const [area, setArea] = useState(user?.apartment || '');
+    const [cargo, setCargo] = useState(user?.cargo || '');
     const [loading, setLoading] = useState(false);
-    // Quién puede crear torres:
-    //  - SUPER_ADMIN: siempre (es el dueño de la plataforma y asigna admins).
-    //  - ADMIN: solo si aún NO administra una comunidad. Al crear se vuelve el
-    //    admin de esa torre, y la regla es "un solo admin por torre/condominio".
-    //    Si ya tiene comunidad, crear otra la dejaría sin admin → se bloquea.
-    //  - USER: nunca; solo puede unirse. El Super Admin debe activarlo como
+    // Quién puede registrar sedes:
+    //  - SUPER_ADMIN: siempre (dueño de la plataforma y asigna admins).
+    //  - ADMIN: solo si aún NO administra una sede. Al registrarla se vuelve su
+    //    admin, y la regla es "un solo admin por sede".
+    //  - USER: nunca; solo puede afiliarse. El Super Admin debe activarlo como
     //    ADMIN primero (panel Super Admin → cambiar rol).
     const isAdmin = user?.role === 'ADMIN';
     const isSuperAdmin = user?.role === 'SUPER_ADMIN';
@@ -1301,65 +1299,26 @@ function JoinCommunityPage() {
     // Ubicación vía mapa + selects en cascada (LocationPicker): evita errores
     // de digitación en dirección/distrito/provincia y guarda lat/lng.
     const [newLoc, setNewLoc] = useState(EMPTY_LOCATION);
-    const [newType, setNewType] = useState<'EDIFICIO' | 'CONDOMINIO' | 'MULTIFAMILIAR'>('EDIFICIO');
-    // Tower config fields (create mode)
-    const [numBuildings, setNumBuildings] = useState(1);
-    const [numFloors, setNumFloors] = useState(10);
-    const [roomsPerFloor, setRoomsPerFloor] = useState(4);
-    const [adminFloor, setAdminFloor] = useState(1);
-    const [adminRoom, setAdminRoom] = useState(1);
-
-    // Auto-generate apartment number: floor*100 + room
-    const adminApartment = String(adminFloor * 100 + adminRoom);
-
-    // Comunidad seleccionada (para mostrar estructura)
-    const selectedCommunity = communities.find(c => c.id === selected);
+    const [newType, setNewType] = useState<'OFICINA' | 'PLANTA' | 'FUNDO'>('OFICINA');
 
     useEffect(() => { api.getCommunities().then(setCommunities); }, []);
 
-    // Al seleccionar comunidad o torre, recarga dptos ocupados Y solicitudes pendientes
-    // (anti-duplicado por torre). La clave es `${tower}|${apt}` para no bloquear
-    // depto 101 en Torre B solo porque alguien lo ocupa en Torre A.
-    useEffect(() => {
-        if (!selected) { setOccupiedMap({}); return; }
-        (async () => {
-            const [users, pending] = await Promise.all([
-                api.getCommunityUsers(selected),
-                api.getPendingApartmentClaims(selected),
-            ]);
-            const map: Record<string, 'ocupado' | 'pendiente'> = {};
-            users.forEach(u => {
-                if (!u.apartment) return;
-                const key = `${(u.tower || '').trim()}|${u.apartment.trim()}`;
-                map[key] = 'ocupado';
-            });
-            pending.forEach(p => {
-                if (!p.unit) return;
-                const key = `${(p.tower || '').trim()}|${(p.unit || '').trim()}`;
-                if (!map[key]) map[key] = 'pendiente';
-            });
-            setOccupiedMap(map);
-        })();
-        setUnit('');
-    }, [selected, tower]);
-
     const submitJoin = async () => {
         if (!selected || !user) return;
-        // Doble verificación en cliente: si el depto ya está tomado en esta torre,
-        // mostramos el motivo exacto sin pegarle al servidor.
-        const key = `${tower.trim()}|${unit.trim()}`;
-        if (occupiedMap[key] === 'ocupado') {
-            toast(`🔒 ${tower || 'La torre'} · Dpto ${unit} ya tiene vecino registrado.`);
-            return;
-        }
-        if (occupiedMap[key] === 'pendiente') {
-            toast(`⏳ ${tower || 'La torre'} · Dpto ${unit} tiene una solicitud pendiente.`);
-            return;
-        }
+        if (!area) { toast('Selecciona tu área'); return; }
+        if (!cargo.trim()) { toast('Indica tu cargo'); return; }
         setLoading(true);
         try {
-            await api.createJoinRequest({ community_id: selected, user_email: user.email, user_name: user.name, tower, unit });
-            toast('✅ Solicitud enviada. El admin debe aprobarla.');
+            await api.createJoinRequest({
+                community_id: selected, user_email: user.email, user_name: user.name,
+                unit: area, cargo: cargo.trim(),
+            });
+            // Guardamos el cargo en el perfil desde ya (el área se asigna al aprobar).
+            if (cargo.trim() !== (user.cargo || '')) {
+                const updated = await api.updateUserProfile(user.id, { cargo: cargo.trim() });
+                setUser(updated);
+            }
+            toast('✅ Solicitud enviada. El administrador de la sede debe aprobarla.');
             go('home');
         } catch (e: any) {
             toast(e?.message || 'Error al enviar solicitud');
@@ -1371,18 +1330,22 @@ function JoinCommunityPage() {
 
     const submitCreate = async () => {
         if (!newName.trim() || !user) return;
-        // Defensa en servidor-lado-cliente: aunque la UI ya oculta el modo crear,
-        // revalidamos el rol y la regla de "un admin por torre" antes de pegarle a la API.
+        // Defensa en cliente: aunque la UI ya oculta el modo crear, revalidamos
+        // el rol y la regla de "un admin por sede" antes de pegarle a la API.
         if (!isAdmin && !isSuperAdmin) {
-            toast('🔒 Solo un administrador puede crear torres. Pide al Super Admin que te active como administrador.');
+            toast('🔒 Solo un administrador puede registrar sedes. Pide al Super Admin que te active como administrador.');
             return;
         }
         if (alreadyRunsCommunity) {
-            toast('🏢 Ya eres administrador de una comunidad. Solo puede haber un admin por torre.');
+            toast('🏢 Ya eres administrador de una sede. Solo puede haber un admin por sede.');
             return;
         }
         if (!locationComplete) {
             toast('📍 Completa la ubicación: busca la dirección en el mapa y confirma distrito y provincia.');
+            return;
+        }
+        if (!area || !cargo.trim()) {
+            toast('Indica tu área y cargo');
             return;
         }
         setLoading(true);
@@ -1396,20 +1359,32 @@ function JoinCommunityPage() {
                 map_lng: newLoc.lng,
                 community_type: newType,
                 admin_email: user.email,
-                num_buildings: numBuildings,
-                total_floors: numFloors,
-                rooms_per_floor: roomsPerFloor,
-                units_per_floor: roomsPerFloor,
             });
             const updated = await api.updateUserProfile(user.id, {
-                community_id: community.id, role: 'ADMIN', tower: tower || 'Torre A', apartment: adminApartment
+                community_id: community.id, role: 'ADMIN', apartment: area, cargo: cargo.trim(),
             });
             setUser(updated);
-            toast(`✅ Torre creada. Tu depto: ${adminApartment}. ¡Eres el administrador!`);
+            toast('✅ Sede registrada. ¡Eres el administrador!');
             go('home');
-        } catch (e: any) { toast('Error: ' + (e.message || 'No se pudo crear')); }
+        } catch (e: any) { toast('Error: ' + (e.message || 'No se pudo registrar')); }
         setLoading(false);
     };
+
+    const labelStyle = { fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' } as const;
+
+    const areaCargoFields = (
+        <>
+            <label className="stagger-item" style={labelStyle}>Área</label>
+            <select className="input stagger-item" value={area} onChange={e => setArea(e.target.value)} style={{ marginBottom: 12 }}>
+                <option value="">Selecciona tu área…</option>
+                {ADR_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+            <label className="stagger-item" style={labelStyle}>Cargo</label>
+            <input className="input stagger-item" list="adr-cargos-afiliacion" placeholder="Ej: Jefe de Mantenimiento"
+                value={cargo} onChange={e => setCargo(e.target.value)} maxLength={80} style={{ marginBottom: 16 }} />
+            <datalist id="adr-cargos-afiliacion">{ADR_CARGOS_SUGERIDOS.map(c => <option key={c} value={c} />)}</datalist>
+        </>
+    );
 
     return (
         <div className="fade-in">
@@ -1419,99 +1394,42 @@ function JoinCommunityPage() {
             {canCreate && (
                 <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}>
                     <button className={`btn btn-full ${!createMode ? 'btn-primary' : 'btn-ghost'}`}
-                        style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(false)}>Unirme a torre</button>
+                        style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(false)}>Afiliarme a sede</button>
                     <button className={`btn btn-full ${createMode ? 'btn-primary' : 'btn-ghost'}`}
-                        style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(true)}>Crear torre nueva</button>
+                        style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(true)}>Registrar sede</button>
                 </div>
             )}
             {!createMode ? (
                 <>
-                    <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }} className="stagger-item">Unirme a torre existente</h3>
-                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Comunidad</label>
+                    <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }} className="stagger-item">Afiliarme a una sede ADR</h3>
+                    <label className="stagger-item" style={labelStyle}>Sede</label>
                     <select className="input stagger-item" value={selected} onChange={e => setSelected(e.target.value)} style={{ marginBottom: 12 }}>
-                        <option value="">Selecciona una comunidad activa…</option>
+                        <option value="">Selecciona una sede activa…</option>
                         {communities.filter(c => c.is_active !== false).map(c => (
                             <option key={c.id} value={c.id}>{c.name} — {communityTypeLabel(c.community_type)} · {c.district || c.address || ''}</option>
                         ))}
                     </select>
 
-                    {selectedCommunity && (
-                        <div className="card stagger-item" style={{ marginBottom: 12, padding: 12, background: 'var(--bg-2)' }}>
-                            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 6 }}>
-                                🏢 {selectedCommunity.total_floors} pisos × {selectedCommunity.rooms_per_floor} dptos =
-                                {' '}<strong>{selectedCommunity.total_floors * selectedCommunity.rooms_per_floor} unidades</strong>
-                            </p>
-                            {Object.keys(occupiedMap).length > 0 && (
-                                <p style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                                    {Object.values(occupiedMap).filter(v => v === 'ocupado').length} dptos registrados ·
-                                    {' '}{Object.values(occupiedMap).filter(v => v === 'pendiente').length} solicitudes pendientes
-                                </p>
-                            )}
-                        </div>
-                    )}
+                    {areaCargoFields}
 
-                    {selectedCommunity && (selectedCommunity.num_buildings || 1) > 1 && (
-                        <>
-                            <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Bloque / Torre</label>
-                            <div className="stagger-item" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                                <select className="input" value={towerKind} onChange={e => setTowerKind(e.target.value as 'Torre' | 'Bloque')}>
-                                    <option value="Torre">Torre</option>
-                                    <option value="Bloque">Bloque</option>
-                                </select>
-                                <select className="input" value={towerLetter} onChange={e => setTowerLetter(e.target.value)}>
-                                    <option value="">Selecciona…</option>
-                                    {Array.from({ length: selectedCommunity.num_buildings || 1 }).map((_, i) => {
-                                        const letter = String.fromCharCode(65 + i);
-                                        return <option key={letter} value={letter}>{letter}</option>;
-                                    })}
-                                </select>
-                            </div>
-                        </>
-                    )}
-
-                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Departamento (selecciona uno)</label>
-                    <select
-                        className="input stagger-item"
-                        value={unit}
-                        disabled={!selectedCommunity}
-                        onChange={e => setUnit(e.target.value)}
-                        style={{ marginBottom: 16 }}>
-                        <option value="">{selectedCommunity ? 'Selecciona departamento…' : 'Primero selecciona la comunidad'}</option>
-                        {selectedCommunity && generateStructure(selectedCommunity.total_floors, selectedCommunity.rooms_per_floor).map(f => (
-                            <optgroup key={f.floor} label={`Piso ${f.floor}`}>
-                                {f.apartments.map(a => {
-                                    // Bloqueamos por torre+depto: 101 en Torre A no afecta a 101 en Torre B
-                                    const status = occupiedMap[`${tower.trim()}|${a}`];
-                                    const disabled = !!status;
-                                    const tag = status === 'ocupado' ? ' · 🔒 ocupado'
-                                              : status === 'pendiente' ? ' · ⏳ solicitud pendiente'
-                                              : ' · libre';
-                                    return (
-                                        <option key={a} value={a} disabled={disabled}>{a}{tag}</option>
-                                    );
-                                })}
-                            </optgroup>
-                        ))}
-                    </select>
-
-                    <button className="btn btn-primary btn-full stagger-item" onClick={submitJoin} disabled={!selected || !unit || loading}>
+                    <button className="btn btn-primary btn-full stagger-item" onClick={submitJoin} disabled={!selected || !area || !cargo.trim() || loading}>
                         {loading ? 'Enviando…' : '📨 Enviar solicitud'}
                     </button>
                     <p className="stagger-item" style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 12, textAlign: 'center' }}>
-                        Recibirás un código <strong>C1-Sxxxx</strong> y el admin gestionará tu solicitud.
+                        Recibirás un código <strong>C1-Sxxxx</strong> y el administrador de la sede gestionará tu solicitud.
                     </p>
                 </>
             ) : (
                 <>
-                    <h3 className="stagger-item" style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Crear comunidad nueva</h3>
-                    <p className="stagger-item" style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16 }}>Serás el <strong>administrador</strong> único de esta comunidad.</p>
+                    <h3 className="stagger-item" style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Registrar sede nueva</h3>
+                    <p className="stagger-item" style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16 }}>Serás el <strong>administrador</strong> único de esta sede y de sus salas.</p>
 
-                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tipo</label>
+                    <label className="stagger-item" style={labelStyle}>Tipo de sede</label>
                     <div className="stagger-item" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
                         {[
-                            { value: 'EDIFICIO' as const, label: '🏢 Edificio' },
-                            { value: 'CONDOMINIO' as const, label: '🏘️ Condominio' },
-                            { value: 'MULTIFAMILIAR' as const, label: '🏠 Multifamiliar' },
+                            { value: 'OFICINA' as const, label: '🏢 Oficina' },
+                            { value: 'PLANTA' as const, label: '🏭 Planta' },
+                            { value: 'FUNDO' as const, label: '🌱 Fundo' },
                         ].map(t => (
                             <button key={t.value} type="button"
                                 className={`btn btn-sm ${newType === t.value ? 'btn-primary' : 'btn-ghost'}`}
@@ -1520,74 +1438,17 @@ function JoinCommunityPage() {
                         ))}
                     </div>
 
-                    <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Nombre</label>
-                    <input className="input stagger-item" placeholder="Ej: Jardines de Sta Beatriz" value={newName} onChange={e => setNewName(e.target.value)} style={{ marginBottom: 12 }} />
+                    <label className="stagger-item" style={labelStyle}>Nombre</label>
+                    <input className="input stagger-item" placeholder="Ej: Oficina Central ADR" value={newName} onChange={e => setNewName(e.target.value)} style={{ marginBottom: 12 }} />
 
                     <div className="stagger-item">
                         <LocationPicker value={newLoc} onChange={setNewLoc} />
                     </div>
 
-                    {/* Tower structure config */}
-                    <div style={{ background: 'var(--bg-3)', borderRadius: 12, padding: 14, marginBottom: 12 }}>
-                        <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>🏗️ Configuración de la torre</p>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
-                            <div>
-                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Edificios</label>
-                                <input className="input" type="number" min={1} max={20} value={numBuildings}
-                                    onChange={e => setNumBuildings(Math.max(1, parseInt(e.target.value) || 1))}
-                                    style={{ padding: '8px', textAlign: 'center' }} />
-                            </div>
-                            <div>
-                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Pisos</label>
-                                <input className="input" type="number" min={1} max={50} value={numFloors}
-                                    onChange={e => setNumFloors(Math.max(1, parseInt(e.target.value) || 1))}
-                                    style={{ padding: '8px', textAlign: 'center' }} />
-                            </div>
-                            <div>
-                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Deptos/piso</label>
-                                <input className="input" type="number" min={1} max={20} value={roomsPerFloor}
-                                    onChange={e => setRoomsPerFloor(Math.max(1, parseInt(e.target.value) || 1))}
-                                    style={{ padding: '8px', textAlign: 'center' }} />
-                            </div>
-                        </div>
-                        <p style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                            Total: {numFloors * roomsPerFloor * numBuildings} departamentos · Numeración: piso{numFloors > 0 ? ' ' + numFloors : ''}, depto {numFloors * 100 + 1} – {numFloors * 100 + roomsPerFloor}
-                        </p>
-                    </div>
+                    {areaCargoFields}
 
-                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tu bloque / torre</label>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                        <select className="input" value={towerKind} onChange={e => setTowerKind(e.target.value as 'Torre' | 'Bloque')}>
-                            <option value="Torre">Torre</option>
-                            <option value="Bloque">Bloque</option>
-                        </select>
-                        <select className="input" value={towerLetter} onChange={e => setTowerLetter(e.target.value)}>
-                            <option value="">Selecciona…</option>
-                            {Array.from({ length: numBuildings }).map((_, i) => {
-                                const letter = String.fromCharCode(65 + i);
-                                return <option key={letter} value={letter}>{letter}</option>;
-                            })}
-                        </select>
-                    </div>
-                    <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Tu piso y depto (auto-generado)</label>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 4 }}>
-                        <div>
-                            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Piso</label>
-                            <input className="input" type="number" min={1} max={numFloors} value={adminFloor}
-                                onChange={e => setAdminFloor(Math.min(numFloors, Math.max(1, parseInt(e.target.value) || 1)))}
-                                style={{ padding: '8px', textAlign: 'center' }} />
-                        </div>
-                        <div>
-                            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 4 }}>Depto en piso</label>
-                            <input className="input" type="number" min={1} max={roomsPerFloor} value={adminRoom}
-                                onChange={e => setAdminRoom(Math.min(roomsPerFloor, Math.max(1, parseInt(e.target.value) || 1)))}
-                                style={{ padding: '8px', textAlign: 'center' }} />
-                        </div>
-                    </div>
-                    <p style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginBottom: 16 }}>Número de depto asignado: <strong>{adminApartment}</strong></p>
-
-                    <button className="btn btn-primary btn-full" onClick={submitCreate} disabled={!newName.trim() || !locationComplete || loading}>
-                        {loading ? 'Creando...' : 'Crear torre y ser admin'}
+                    <button className="btn btn-primary btn-full" onClick={submitCreate} disabled={!newName.trim() || !locationComplete || !area || !cargo.trim() || loading}>
+                        {loading ? 'Registrando...' : 'Registrar sede y ser admin'}
                     </button>
                     {!locationComplete && (
                         <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 8, textAlign: 'center' }}>
@@ -1614,40 +1475,36 @@ function AdminPage() {
     const [complianceMap, setComplianceMap] = useState<Record<string, number>>({}); // reservationId -> %
     const [rejectTarget, setRejectTarget] = useState<string | null>(null); // requestId being rejected
     const [rejectMsg, setRejectMsg] = useState('');
-    const [towerUserCounts, setTowerUserCounts] = useState<Record<string, number>>({}); // tower -> count
+    const [areaUserCounts, setAreaUserCounts] = useState<Record<string, number>>({}); // área -> colaboradores
 
     // Create space form state
     const [spaceName, setSpaceName] = useState('');
     const [spaceType, setSpaceType] = useState('');
-    const [spaceCapacity, setSpaceCapacity] = useState('20');
+    const [spaceCapacity, setSpaceCapacity] = useState('8');
     const [spaceDesc, setSpaceDesc] = useState('');
     const [spacePoints, setSpacePoints] = useState('10');
     const [spaceImageFile, setSpaceImageFile] = useState<File | null>(null);
     const [spaceLoading, setSpaceLoading] = useState(false);
 
-    // Default images per amenity type
+    // Imagen por defecto según el tipo de sala
     const DEFAULT_IMAGES: Record<string, string> = {
-        'PISCINA': 'https://images.unsplash.com/photo-1576013551627-0cc20b96c2a7?w=800',
-        'GIMNASIO': 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
-        'PARRILLA': 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=800',
-        'SALON': 'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?w=800',
-        'COWORKING': 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800',
-        'CANCHA': 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=800',
-        'JARDIN': 'https://images.unsplash.com/photo-1585320806297-9794b3e4eeae?w=800',
-        'ESTACIONAMIENTO': 'https://images.unsplash.com/photo-1506521781263-d8422e82f27a?w=800',
+        'DIRECTORIO': 'https://images.unsplash.com/photo-1431540015161-0bf868a2d407?w=800',
+        'REUNIONES': 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=800',
+        'CAPACITACION': 'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=800',
+        'VIDEOCONFERENCIA': 'https://images.unsplash.com/photo-1600508774634-4e11d34730e2?w=800',
+        'AUDITORIO': 'https://images.unsplash.com/photo-1505373877841-8d25f7d46678?w=800',
+        'FOCUS': 'https://images.unsplash.com/photo-1497366811353-6870744d04b2?w=800',
         'OTRO': 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800',
     };
 
     const SPACE_PRESETS = [
-        { type: 'PISCINA', label: '🏊 Piscina', desc: 'Piscina comunitaria con área de descanso', cap: 30 },
-        { type: 'GIMNASIO', label: '🏋️ Gimnasio', desc: 'Equipamiento moderno y amplio espacio', cap: 15 },
-        { type: 'PARRILLA', label: '🔥 Área de Parrillas', desc: 'Zona BBQ con mesas y bancas', cap: 20 },
-        { type: 'SALON', label: '🎉 Salón de Eventos', desc: 'Salón equipado para eventos sociales', cap: 50 },
-        { type: 'COWORKING', label: '💻 Coworking', desc: 'Espacio de trabajo compartido con WiFi', cap: 10 },
-        { type: 'CANCHA', label: '⚽ Cancha', desc: 'Cancha deportiva multiuso', cap: 20 },
-        { type: 'JARDIN', label: '🌿 Jardín', desc: 'Área verde comunitaria', cap: 40 },
-        { type: 'ESTACIONAMIENTO', label: '🅿️ Estacionamiento', desc: 'Espacios de estacionamiento para visitas', cap: 10 },
-        { type: 'OTRO', label: '📦 Otro', desc: '', cap: 20 },
+        { type: 'DIRECTORIO', label: '👔 Sala de Directorio', desc: 'Mesa ejecutiva, pantalla y videoconferencia', cap: 14 },
+        { type: 'REUNIONES', label: '🤝 Sala de Reuniones', desc: 'Sala estándar con TV y pizarra', cap: 8 },
+        { type: 'CAPACITACION', label: '🎓 Sala de Capacitación', desc: 'Proyector, sonido y mesas modulares', cap: 30 },
+        { type: 'VIDEOCONFERENCIA', label: '🎥 Videoconferencia', desc: 'Cámara, micrófono y pantalla para Teams', cap: 6 },
+        { type: 'AUDITORIO', label: '🎤 Auditorio', desc: 'Escenario, sonido y butacas', cap: 80 },
+        { type: 'FOCUS', label: '💬 Sala Focus', desc: 'Sala pequeña para 1 a 1 o llamadas', cap: 3 },
+        { type: 'OTRO', label: '📦 Otra', desc: '', cap: 8 },
     ];
 
     if (user?.role !== 'ADMIN') return <div className="empty-state"><p>Acceso denegado</p></div>;
@@ -1659,13 +1516,11 @@ function AdminPage() {
         if (v === 'requests' && user.community_id) {
             const reqs = await api.getPendingRequests(user.community_id);
             setRequests(reqs);
-            // Count existing users per tower
-            if (user.community_id) {
-                const communityUsers = await api.getCommunityUsers(user.community_id);
-                const counts: Record<string, number> = {};
-                communityUsers.forEach(u => { if (u.tower) counts[u.tower] = (counts[u.tower] || 0) + 1; });
-                setTowerUserCounts(counts);
-            }
+            // Colaboradores ya afiliados por área
+            const communityUsers = await api.getCommunityUsers(user.community_id);
+            const counts: Record<string, number> = {};
+            communityUsers.forEach(u => { if (u.apartment) counts[u.apartment] = (counts[u.apartment] || 0) + 1; });
+            setAreaUserCounts(counts);
         }
         if (v === 'analytics') api.getAnalytics(user.community_id).then(setAnalytics);
         if (v === 'spaces') api.getAmenities(user.community_id).then(setAmenities);
@@ -1679,9 +1534,11 @@ function AdminPage() {
     };
 
     const approveReq = async (id: string) => {
-        await api.approveJoinRequest(id);
-        setRequests(r => r.filter(x => x.id !== id));
-        toast('Solicitud aprobada');
+        try {
+            await api.approveJoinRequest(id);
+            setRequests(r => r.filter(x => x.id !== id));
+            toast('Solicitud aprobada');
+        } catch (e: any) { toast('Error: ' + (e.message || 'No se pudo aprobar')); }
     };
 
     const doReject = async (id: string) => {
@@ -1710,7 +1567,7 @@ function AdminPage() {
                 community_id: user.community_id,
                 name: spaceName.trim(),
                 amenity_type: spaceType || 'OTRO',
-                capacity: parseInt(spaceCapacity) || 20,
+                capacity: parseInt(spaceCapacity) || 8,
                 description: spaceDesc.trim(),
                 image_url: imageUrl,
                 points_reward: parseInt(spacePoints) || 10,
@@ -1724,21 +1581,21 @@ function AdminPage() {
             }
 
             setAmenities(prev => [...prev, newAmenity]);
-            toast('✅ Espacio creado correctamente');
+            toast('✅ Sala creada correctamente');
             // Reset form
             setShowCreateSpace(false);
             setSpaceName(''); setSpaceType(''); setSpaceDesc('');
-            setSpaceCapacity('20'); setSpacePoints('10'); setSpaceImageFile(null);
+            setSpaceCapacity('8'); setSpacePoints('10'); setSpaceImageFile(null);
         } catch (e: any) { toast('Error: ' + (e.message || 'No se pudo crear')); }
         setSpaceLoading(false);
     };
 
     const deleteSpace = async (id: string) => {
-        if (!confirm('¿Eliminar este espacio? Las reservas existentes se perderán.')) return;
+        if (!confirm('¿Eliminar esta sala? Las reservas existentes se perderán.')) return;
         try {
             await api.deleteAmenity(id);
             setAmenities(prev => prev.filter(a => a.id !== id));
-            toast('Espacio eliminado');
+            toast('Sala eliminada');
         } catch { toast('Error al eliminar'); }
     };
 
@@ -1754,12 +1611,12 @@ function AdminPage() {
     if (view === 'menu') return (
         <div className="fade-in">
             <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>admin_panel_settings</span> Panel Admin</h2>
-            {[{ icon: 'meeting_room', title: 'Espacios', desc: 'Crear y gestionar áreas', v: 'spaces' },
-            { icon: 'people', title: 'Usuarios', desc: 'Gestionar vecinos', v: 'users' },
-            { icon: 'qr_code_scanner', title: 'Validar QR', desc: 'Escanear acceso de vecinos e invitados', v: 'qr-validate' },
-            { icon: 'fact_check', title: 'Auditoría', desc: 'Calificar reservas', v: 'audit' },
-            { icon: 'mail', title: 'Solicitudes', desc: 'Aprobar ingresos', v: 'requests' },
-            { icon: 'gavel', title: 'Reglas', desc: 'Sanciones y restricciones', v: 'rules' },
+            {[{ icon: 'meeting_room', title: 'Salas', desc: 'Crear y gestionar salas de reunión', v: 'spaces' },
+            { icon: 'people', title: 'Colaboradores', desc: 'Usuarios, áreas y cargos', v: 'users' },
+            { icon: 'qr_code_scanner', title: 'Validar QR', desc: 'Escanear acceso de colaboradores y visitantes', v: 'qr-validate' },
+            { icon: 'fact_check', title: 'Auditoría', desc: 'Calificar uso de las salas', v: 'audit' },
+            { icon: 'mail', title: 'Solicitudes', desc: 'Aprobar afiliaciones a la sede', v: 'requests' },
+            { icon: 'gavel', title: 'Reglas', desc: 'Sanciones por área y restricciones', v: 'rules' },
             { icon: 'analytics', title: 'Analytics', desc: 'Dashboard', v: 'analytics' }
             ].map(item => (
                 <div key={item.v} className="admin-card" onClick={() => item.v === 'qr-validate' ? go('qr-validate') : load(item.v)}>
@@ -1777,8 +1634,6 @@ function AdminPage() {
         return (
             <SanctionsPage
                 user={user}
-                communityFloors={user.community?.total_floors || 10}
-                communityRooms={user.community?.rooms_per_floor || 4}
                 onBack={() => setView('menu')}
                 onToast={toast}
             />
@@ -1794,7 +1649,7 @@ function AdminPage() {
             {/* ─── Spaces Management ─── */}
             {view === 'spaces' && (<>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                    <h2 className="section-title" style={{ marginBottom: 0 }}>Espacios ({amenities.length})</h2>
+                    <h2 className="section-title" style={{ marginBottom: 0 }}>Salas ({amenities.length})</h2>
                     <button className="btn btn-primary btn-sm" onClick={() => setShowCreateSpace(!showCreateSpace)}>
                         <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{showCreateSpace ? 'close' : 'add'}</span>
                         {showCreateSpace ? 'Cancelar' : 'Crear'}
@@ -1804,10 +1659,10 @@ function AdminPage() {
                 {/* Create form */}
                 {showCreateSpace && (
                     <div className="card" style={{ padding: 20, marginBottom: 20 }}>
-                        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Nuevo Espacio</h3>
+                        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Nueva sala</h3>
 
                         {/* Preset selector */}
-                        <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 8, display: 'block' }}>Tipo de espacio</label>
+                        <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 8, display: 'block' }}>Tipo de sala</label>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 16 }}>
                             {SPACE_PRESETS.map(p => (
                                 <button key={p.type}
@@ -1833,10 +1688,10 @@ function AdminPage() {
                         )}
 
                         <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Nombre</label>
-                        <input className="input" placeholder="Ej: Piscina Rooftop" value={spaceName} onChange={e => setSpaceName(e.target.value)} style={{ marginBottom: 12 }} />
+                        <input className="input" placeholder="Ej: Sala Arándano — 2.º piso" value={spaceName} onChange={e => setSpaceName(e.target.value)} style={{ marginBottom: 12 }} />
 
                         <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Descripción</label>
-                        <textarea className="input" placeholder="Descripción del espacio..." value={spaceDesc} onChange={e => setSpaceDesc(e.target.value)}
+                        <textarea className="input" placeholder="Equipamiento, ubicación, indicaciones..." value={spaceDesc} onChange={e => setSpaceDesc(e.target.value)}
                             style={{ marginBottom: 12, minHeight: 60, resize: 'vertical' }} />
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
@@ -1845,13 +1700,13 @@ function AdminPage() {
                                 <input className="input" type="number" min="1" value={spaceCapacity} onChange={e => setSpaceCapacity(e.target.value)} />
                             </div>
                             <div>
-                                <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Puntos por reserva</label>
+                                <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Puntos por reunión cumplida</label>
                                 <input className="input" type="number" min="0" value={spacePoints} onChange={e => setSpacePoints(e.target.value)} />
                             </div>
                         </div>
 
                         <button className="btn btn-primary btn-full" onClick={createSpace} disabled={!spaceName.trim() || !spaceType || spaceLoading}>
-                            {spaceLoading ? 'Creando...' : 'Crear Espacio'}
+                            {spaceLoading ? 'Creando...' : 'Crear sala'}
                         </button>
                     </div>
                 )}
@@ -1860,10 +1715,10 @@ function AdminPage() {
                 {amenities.length === 0 && !showCreateSpace ? (
                     <div className="empty-state" style={{ padding: 40 }}>
                         <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--text-3)' }}>meeting_room</span>
-                        <p style={{ fontSize: 16, fontWeight: 600, marginTop: 12 }}>No hay espacios creados</p>
-                        <p style={{ fontSize: 13, color: 'var(--text-3)' }}>Crea el primer espacio para tus vecinos</p>
+                        <p style={{ fontSize: 16, fontWeight: 600, marginTop: 12 }}>No hay salas creadas</p>
+                        <p style={{ fontSize: 13, color: 'var(--text-3)' }}>Crea la primera sala de reunión de tu sede</p>
                         <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => setShowCreateSpace(true)}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span> Crear Espacio
+                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span> Crear sala
                         </button>
                     </div>
                 ) : (
@@ -1901,11 +1756,15 @@ function AdminPage() {
             </>)}
 
             {view === 'users' && (<>
-                <h2 className="section-title">Usuarios ({allUsers.length})</h2>
+                <h2 className="section-title">Colaboradores ({allUsers.length})</h2>
                 {allUsers.map(u => (
                     <div key={u.id} className="card" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div className="avatar">{u.name[0]}</div>
-                        <div style={{ flex: 1 }}><h4 style={{ fontSize: 14 }}>{u.name}</h4><p style={{ fontSize: 12, color: 'var(--text-3)' }}>{u.email} • {u.role}</p></div>
+                        <div style={{ flex: 1 }}>
+                            <h4 style={{ fontSize: 14 }}>{u.name}</h4>
+                            <p style={{ fontSize: 12, color: 'var(--text-2)' }}>{[u.cargo, u.apartment].filter(Boolean).join(' · ') || 'Sin área / cargo'}</p>
+                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{u.email} • {u.role}</p>
+                        </div>
                         <span className={`badge ${u.status === 'ACTIVO' ? 'badge-accent' : 'badge-danger'}`}>{u.status}</span>
                     </div>
                 ))}
@@ -1917,7 +1776,14 @@ function AdminPage() {
                 {reservations.filter(r => r.grade === 'PENDIENTE').map(r => (
                     <div key={r.id} className="card" style={{ marginBottom: 8 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                            <div><h4 style={{ fontSize: 14 }}>{(r as any).user?.name}</h4><p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.amenity?.name} • {r.date} • {r.time_slot}</p></div>
+                            <div>
+                                <h4 style={{ fontSize: 14 }}>{(r as any).user?.name}</h4>
+                                {((r as any).user?.cargo || (r as any).user?.apartment) && (
+                                    <p style={{ fontSize: 11, color: 'var(--text-3)' }}>{[(r as any).user?.cargo, (r as any).user?.apartment].filter(Boolean).join(' · ')}</p>
+                                )}
+                                <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.amenity?.name} • {r.date} • {r.time_slot}{r.attendees ? ` • 👥 ${r.attendees}` : ''}</p>
+                                {r.motivo && <p style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>📝 {r.motivo}</p>}
+                            </div>
                         </div>
                         {/* Compliance slider */}
                         <div style={{ marginBottom: 8 }}>
@@ -1951,17 +1817,18 @@ function AdminPage() {
                                     </span>
                                 )}
                             </div>
-                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.user_email} • {r.tower || ''} {r.unit ? `Dpto ${r.unit}` : ''}</p>
-                            {r.tower && towerUserCounts[r.tower] !== undefined && (
+                            <p style={{ fontSize: 12, color: 'var(--text-2)' }}>{[r.cargo, r.unit].filter(Boolean).join(' · ') || 'Sin área / cargo'}</p>
+                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.user_email}</p>
+                            {r.unit && areaUserCounts[r.unit] !== undefined && (
                                 <p style={{ fontSize: 11, color: 'var(--primary-light)', marginTop: 2 }}>
-                                    🏢 {towerUserCounts[r.tower]} vecino{towerUserCounts[r.tower] !== 1 ? 's' : ''} ya en {r.tower}
+                                    👥 {areaUserCounts[r.unit]} colaborador{areaUserCounts[r.unit] !== 1 ? 'es' : ''} ya en {r.unit}
                                 </p>
                             )}
                             {rejectTarget === r.id ? (
                                 <div style={{ marginTop: 10, padding: '10px', background: 'var(--bg-3)', borderRadius: 10 }}>
                                     <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Razón del rechazo (opcional):</p>
                                     <textarea className="input" rows={2} style={{ fontSize: 13, width: '100%', marginBottom: 8 }}
-                                        placeholder="Ej: El departamento indicado no existe..."
+                                        placeholder="Ej: No perteneces a esta sede / el área indicada no corresponde..."
                                         value={rejectMsg} onChange={e => setRejectMsg(e.target.value)} />
                                     <div style={{ display: 'flex', gap: 8 }}>
                                         <button className="btn btn-danger btn-sm" onClick={() => doReject(r.id)}>Confirmar rechazo</button>
@@ -1984,7 +1851,7 @@ function AdminPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
                     {[{ label: 'Reservas', value: analytics.totalReservations, icon: 'event' },
                     { label: 'Ocupación', value: `${analytics.occupancyRate}%`, icon: 'trending_up' },
-                    { label: 'Usuarios', value: analytics.totalUsers, icon: 'people' },
+                    { label: 'Colaboradores', value: analytics.totalUsers, icon: 'people' },
                     { label: 'Posts', value: analytics.totalPosts, icon: 'forum' }
                     ].map(s => (
                         <div key={s.label} className="card" style={{ textAlign: 'center' }}>
@@ -1994,7 +1861,7 @@ function AdminPage() {
                         </div>
                     ))}
                 </div>
-                <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Por Espacio</h3>
+                <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Por sala</h3>
                 {Object.entries(analytics.byAmenity).map(([name, count]) => (
                     <div key={name} className="card" style={{ marginBottom: 6, padding: 12, display: 'flex', justifyContent: 'space-between' }}>
                         <span style={{ fontSize: 14 }}>{name}</span>

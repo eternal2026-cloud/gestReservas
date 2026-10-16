@@ -1,0 +1,34 @@
+import React from 'react';
+
+/**
+ * Isotipo ADR (Agrícola Don Ricardo): medio círculo azul, círculo naranja y
+ * medio círculo verde sobre fondo marrón oscuro, con una mesa de reunión
+ * estilizada debajo para identificar la app de Salas.
+ */
+export function AdrMark({ size = 40, rounded = true }: { size?: number; rounded?: boolean }) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="ADR Salas">
+            <rect width="512" height="512" rx={rounded ? 112 : 0} fill="#15110E" />
+            <g transform="translate(51 120) scale(0.6308)">
+                <path d="M0,0 A150,150 0 0 1 0,300 Z" fill="#0097CE" />
+                <circle cx="262" cy="188" r="112" fill="#EF7C3B" />
+                <path d="M350,300 A150,150 0 0 1 650,300 Z" fill="#76B729" />
+            </g>
+            <rect x="96" y="352" width="320" height="22" rx="11" fill="#FFFFFF" opacity="0.92" />
+            <rect x="136" y="388" width="18" height="44" rx="9" fill="#FFFFFF" opacity="0.6" />
+            <rect x="358" y="388" width="18" height="44" rx="9" fill="#FFFFFF" opacity="0.6" />
+        </svg>
+    );
+}
+
+/** Logotipo horizontal: isotipo + "Salas ADR". */
+export function AdrLogo({ size = 38 }: { size?: number }) {
+    return (
+        <>
+            <AdrMark size={size} />
+            <span className="logo-text">Salas <span style={{ color: 'var(--adr-verde)' }}>ADR</span></span>
+        </>
+    );
+}
+
+export default AdrMark;

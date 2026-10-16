@@ -1,5 +1,6 @@
 import React from 'react';
 import { User } from '../types';
+import { AdrMark } from './AdrLogo';
 
 interface LayoutProps {
     children: React.ReactNode;
@@ -10,19 +11,10 @@ interface LayoutProps {
     isDarkMode: boolean;
 }
 
-// Minimal Roomly Logo
-const RoomlyLogo = () => (
-    <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect width="40" height="40" rx="8" fill="#7C3AED"/>
-        <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-        <path d="M20 28V22" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-);
-
 export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onNavigate, user, toggleTheme, isDarkMode }) => {
     const navItems = [
-        { id: 'home', icon: 'apartment', label: 'Mi Torre' },
-        { id: 'community', icon: 'forum', label: 'Comunidad' },
+        { id: 'home', icon: 'home', label: 'Inicio' },
+        { id: 'community', icon: 'forum', label: 'Muro ADR' },
         { id: 'amenities', icon: 'calendar_month', label: 'Reservas' },
         { id: 'leaderboard', icon: 'leaderboard', label: 'Top' },
         { id: 'profile', icon: 'person', label: 'Perfil' }
@@ -33,8 +25,8 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onNavigate,
             {/* Desktop Side Nav */}
             <nav className="hidden md:flex flex-col fixed left-0 top-0 h-full w-64 bg-surface-light dark:bg-surface-dark border-r border-gray-200 dark:border-white/5 py-6 px-4 z-50 shadow-sm">
                 <div className="flex items-center gap-3 mb-10 px-2 cursor-pointer" onClick={() => onNavigate('home')}>
-                    <RoomlyLogo />
-                    <span className="text-xl font-bold tracking-tight text-gray-900 dark:text-white">Roomly</span>
+                    <AdrMark size={32} />
+                    <span className="text-xl font-bold tracking-tight text-gray-900 dark:text-white">Salas ADR</span>
                 </div>
                 
                 <div className="space-y-1 flex-1">

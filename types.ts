@@ -1,4 +1,12 @@
-// ─── Roomly v2 Types ───
+// ─── Salas ADR · Tipos ───
+// Mapeo con el modelo heredado de Roomly (mismas tablas en Supabase):
+//   communities → Sedes ADR (oficina, planta o fundo)
+//   amenities   → Salas de reunión
+//   users.apartment / join_requests.unit → Área del colaborador
+//   users.cargo / join_requests.cargo    → Cargo del colaborador
+//   reservations.motivo                  → Motivo de la reunión
+
+export type SedeType = 'OFICINA' | 'PLANTA' | 'FUNDO';
 
 export interface Community {
     id: string;
@@ -6,7 +14,7 @@ export interface Community {
     address?: string;
     district?: string;
     province?: string;
-    community_type?: 'EDIFICIO' | 'CONDOMINIO' | 'MULTIFAMILIAR';
+    community_type?: SedeType;
     map_lat?: number;
     map_lng?: number;
     admin_email: string;
@@ -32,7 +40,8 @@ export interface User {
     role: UserRole;
     community_id?: string;
     tower?: string;
-    apartment?: string;
+    apartment?: string;       // Área del colaborador
+    cargo?: string;           // Cargo del colaborador
     avatar_url?: string;
     points: number;
     status: 'ACTIVO' | 'INACTIVO';
@@ -60,6 +69,8 @@ export interface Reservation {
     amenity_id: string;
     date: string;
     time_slot: string;
+    motivo?: string;          // Motivo de la reunión
+    attendees?: number;       // N.º de asistentes estimado
     status: 'ACTIVA' | 'CANCELADA' | 'FINALIZADA';
     grade: 'PENDIENTE' | 'CUMPLIDA' | 'INCUMPLIDA';
     compliance_pct: number;
@@ -72,7 +83,7 @@ export interface Reservation {
 export interface Sanction {
     id: string;
     community_id: string;
-    apartment: string;
+    apartment: string;        // Área sancionada
     amenity_id: string;
     start_date: string;
     end_date: string;
@@ -140,8 +151,9 @@ export interface JoinRequest {
     community_id: string;
     user_email: string;
     user_name: string;
-    unit?: string;
+    unit?: string;            // Área
     tower?: string;
+    cargo?: string;
     status: 'PENDIENTE' | 'APROBADA' | 'RECHAZADA';
     created_at: string;
     community?: Community;
@@ -191,16 +203,16 @@ export interface PointAction {
 
 export const POINT_ACTIONS: PointAction[] = [
     { action: 'PROFILE_PHOTO', description: 'Subir foto de perfil', points: 20 },
-    { action: 'UPLOAD_AREA_PHOTO', description: 'Subir foto de área común', points: 15 },
+    { action: 'UPLOAD_AREA_PHOTO', description: 'Subir foto de una sala', points: 15 },
     { action: 'COMMENT', description: 'Escribir comentario', points: 5 },
     { action: 'BUG_REPORT', description: 'Reportar bug', points: 25 },
-    { action: 'RESERVATION_COMPLETED', description: 'Reserva cumplida', points: 10 },
+    { action: 'RESERVATION_COMPLETED', description: 'Reunión cumplida (sala bien usada)', points: 10 },
     { action: 'LIKE_RECEIVED', description: 'Recibir like', points: 2 },
 ];
 
 export function getUserLevel(points: number): { name: string; color: string; min: number; icon: string } {
-    if (points >= 500) return { name: 'Leyenda', color: '#a855f7', min: 500, icon: '👑' };
-    if (points >= 200) return { name: 'Líder Comunitario', color: '#7c3aed', min: 200, icon: '⭐' };
-    if (points >= 50) return { name: 'Vecino Activo', color: '#8b5cf6', min: 50, icon: '🏠' };
-    return { name: 'Nuevo Vecino', color: '#a78bfa', min: 0, icon: '🌱' };
+    if (points >= 500) return { name: 'Referente ADR', color: '#EF7C3B', min: 500, icon: '🏆' };
+    if (points >= 200) return { name: 'Colaborador Destacado', color: '#0097CE', min: 200, icon: '⭐' };
+    if (points >= 50) return { name: 'Colaborador Activo', color: '#76B729', min: 50, icon: '🤝' };
+    return { name: 'Nuevo Colaborador', color: '#8FC844', min: 0, icon: '🌱' };
 }

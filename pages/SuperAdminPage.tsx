@@ -3,6 +3,7 @@ import * as api from '../services/api';
 import type { User, Community, JoinRequest, UserRole } from '../types';
 import { useAnimeStagger, pulse } from '../components/useAnime';
 import { Loader } from '../components/Loader';
+import { communityTypeLabel } from '../services/structure';
 
 interface SuperAdminPageProps {
     onBack: () => void;
@@ -154,7 +155,7 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
             u.name?.toLowerCase().includes(q) ||
             u.email?.toLowerCase().includes(q) ||
             u.apartment?.toLowerCase().includes(q) ||
-            u.tower?.toLowerCase().includes(q) ||
+            u.cargo?.toLowerCase().includes(q) ||
             (u.community?.name || '').toLowerCase().includes(q)
         );
     });
@@ -168,18 +169,18 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
             </button>
 
             <h2 className="section-title">
-                <span className="material-symbols-outlined" style={{ color: '#f59e0b' }}>shield_person</span>
+                <span className="material-symbols-outlined" style={{ color: 'var(--adr-naranja)' }}>shield_person</span>
                 Panel Super Admin
             </h2>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 16 }}>
-                Gestión global: usuarios, comunidades y solicitudes de la plataforma.
+                Gestión global: colaboradores, sedes y solicitudes de Salas ADR.
             </p>
 
             {/* Tabs */}
             <div className="leaderboard-tabs" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
                 <button className={`leaderboard-tab ${tab === 'overview' ? 'active' : ''}`} onClick={() => setTab('overview')}>📊 Resumen</button>
                 <button className={`leaderboard-tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>👥 Usuarios</button>
-                <button className={`leaderboard-tab ${tab === 'communities' ? 'active' : ''}`} onClick={() => setTab('communities')}>🏢 Comunidades</button>
+                <button className={`leaderboard-tab ${tab === 'communities' ? 'active' : ''}`} onClick={() => setTab('communities')}>🏢 Sedes</button>
                 <button className={`leaderboard-tab ${tab === 'requests' ? 'active' : ''}`} onClick={() => setTab('requests')}>
                     📨 Solicitudes{stats.solicitudes > 0 && <span className="badge badge-danger" style={{ marginLeft: 4, fontSize: 10 }}>{stats.solicitudes}</span>}
                 </button>
@@ -189,7 +190,7 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                 {tab === 'overview' && (
                     <>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
-                            <Stat className="sa-row" icon="apartment" label="Comunidades" value={`${stats.comunidadesActivas}/${stats.comunidades}`} hint="activas / totales" />
+                            <Stat className="sa-row" icon="apartment" label="Sedes" value={`${stats.comunidadesActivas}/${stats.comunidades}`} hint="activas / totales" />
                             <Stat className="sa-row" icon="group" label="Usuarios" value={`${stats.usuariosActivos}/${stats.usuarios}`} hint="activos / totales" />
                             <Stat className="sa-row" icon="badge" label="Administradores" value={String(stats.admins)} hint="rol ADMIN" />
                             <Stat className="sa-row" icon="mail" label="Solicitudes" value={String(stats.solicitudes)} hint="pendientes" />
@@ -198,8 +199,8 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                             <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>📌 Tareas del Super Admin</h4>
                             <ul style={{ paddingLeft: 18, fontSize: 13, lineHeight: 1.8, color: 'var(--text-2)' }}>
                                 <li>Editar rol y estado de cualquier usuario (pestaña Usuarios)</li>
-                                <li>Aprobar o rechazar solicitudes pendientes de cualquier comunidad</li>
-                                <li>Suspender o reactivar comunidades en mora</li>
+                                <li>Aprobar o rechazar solicitudes pendientes de cualquier sede</li>
+                                <li>Suspender o reactivar sedes</li>
                                 <li>Acceso global a todos los datos de la plataforma</li>
                             </ul>
                         </div>
@@ -210,7 +211,7 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                     <>
                         <input
                             className="input sa-row"
-                            placeholder="🔎 Buscar por nombre, correo, depto, torre o comunidad…"
+                            placeholder="🔎 Buscar por nombre, correo, área, cargo o sede…"
                             value={search}
                             onChange={e => setSearch(e.target.value)}
                             style={{ marginBottom: 12 }}
@@ -225,8 +226,8 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                                         <Th>Nombre</Th>
                                         <Th>Correo</Th>
                                         <Th>Rol</Th>
-                                        <Th>Comunidad</Th>
-                                        <Th>Depto</Th>
+                                        <Th>Sede</Th>
+                                        <Th>Área · Cargo</Th>
                                         <Th>Tipo</Th>
                                         <Th>Administrador</Th>
                                         <Th>Fecha unión</Th>
@@ -238,11 +239,7 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                                         <tr><td colSpan={9} style={{ textAlign: 'center', padding: 24, color: 'var(--text-3)' }}>Sin usuarios</td></tr>
                                     ) : filteredUsers.map(u => {
                                         const comm = u.community as any;
-                                        const tipo = comm?.community_type
-                                            ? (comm.community_type === 'EDIFICIO' ? 'Edificio'
-                                                : comm.community_type === 'CONDOMINIO' ? 'Condominio'
-                                                : 'Multifamiliar')
-                                            : '—';
+                                        const tipo = comm?.community_type ? communityTypeLabel(comm.community_type) : '—';
                                         const adminEmail = comm?.admin_email || '—';
                                         return (
                                             <tr key={u.id} id={`sa-user-${u.id}`} style={{ borderTop: '1px solid var(--border)' }}>
@@ -261,7 +258,7 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                                                     </select>
                                                 </Td>
                                                 <Td>{comm?.name || '—'}</Td>
-                                                <Td>{u.tower ? `${u.tower} · ${u.apartment || '—'}` : (u.apartment || '—')}</Td>
+                                                <Td>{[u.apartment, u.cargo].filter(Boolean).join(' · ') || '—'}</Td>
                                                 <Td>{tipo}</Td>
                                                 <Td title={adminEmail} style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{adminEmail}</Td>
                                                 <Td>{formatDate(u.created_at)}</Td>
@@ -283,7 +280,7 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                             </table>
                         </div>
                         <p className="sa-row" style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 8 }}>
-                            Tip: el cambio de rol y estado es inmediato. Al promover a un usuario a Administrador podrá crear su torre/condominio (será su único admin); si ya administra una comunidad, primero debe cederla.
+                            Tip: el cambio de rol y estado es inmediato. Al promover a un usuario a Administrador podrá registrar su sede (será su único admin); si ya administra una sede, primero debe cederla.
                         </p>
                     </>
                 )}
@@ -291,7 +288,7 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                 {tab === 'communities' && (
                     <>
                         {communities.length === 0 ? (
-                            <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Sin comunidades registradas.</p>
+                            <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Sin sedes registradas.</p>
                         ) : communities.map(c => (
                             <div key={c.id} className="card sa-row" style={{ marginBottom: 8, padding: 14 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
@@ -343,7 +340,7 @@ export function SuperAdminPage({ onBack, onToast }: SuperAdminPageProps) {
                                     </div>
                                     <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.user_email}</p>
                                     <p style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>
-                                        🏢 {commName} {r.tower ? `· ${r.tower}` : ''} {r.unit ? `· Dpto ${r.unit}` : ''}
+                                        🏢 {commName} {r.unit ? `· ${r.unit}` : ''} {r.cargo ? `· ${r.cargo}` : ''}
                                     </p>
                                     <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>
                                         Solicitada el {formatDate(r.created_at)}

@@ -1,6 +1,6 @@
 {
-  "name": "Roomly",
-  "description": "Gestión de comunidad y reservas para torres con sistema de gamificación.",
+  "name": "Salas ADR",
+  "description": "Gestión y reserva de salas de reunión de Agrícola Don Ricardo.",
   "requestFramePermissions": [
     "camera",
     "microphone"

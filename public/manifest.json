@@ -1,11 +1,11 @@
 {
-    "name": "Roomly — Tu comunidad, conectada",
-    "short_name": "Roomly",
-    "description": "Reserva espacios comunes de tu edificio y participa en la comunidad.",
+    "name": "Salas ADR — Reserva de salas de reunión",
+    "short_name": "Salas ADR",
+    "description": "Reserva las salas de reunión de Agrícola Don Ricardo.",
     "start_url": "/",
     "display": "standalone",
-    "background_color": "#0a0a1a",
-    "theme_color": "#7C3AED",
+    "background_color": "#15110E",
+    "theme_color": "#15110E",
     "orientation": "portrait",
     "icons": [
         {
@@ -16,7 +16,7 @@
         }
     ],
     "categories": [
-        "lifestyle",
-        "social"
+        "business",
+        "productivity"
     ]
 }

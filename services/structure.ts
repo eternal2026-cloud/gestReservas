@@ -1,53 +1,48 @@
-// Estructura de departamentos según el PDF Roomly_Plan_Implementacion (pág. 4.4)
-// Ejemplo «Jardines de Sta Beatriz»: 20 pisos × 6 dptos = 120 unidades
-//   Piso 1  → 101, 102, 103, 104, 105, 106
-//   Piso 10 → 1001, 1002, ..., 1006
-//   Piso 20 → 2001, 2002, ..., 2006
+// Catálogos de Salas ADR: áreas, sedes y tipos de sala.
+// (Reemplaza la estructura de pisos × departamentos de Roomly.)
 
-export interface FloorStructure {
-    floor: number;
-    apartments: string[];
-}
+import type { SedeType } from '../types';
 
-/**
- * Genera la estructura completa de departamentos.
- * @param floors  Número total de pisos (1..99 razonable)
- * @param roomsPerFloor Departamentos por piso (1..9)
- * @returns Array por piso
- */
-export function generateStructure(floors: number, roomsPerFloor: number): FloorStructure[] {
-    const result: FloorStructure[] = [];
-    for (let f = 1; f <= floors; f++) {
-        const apartments: string[] = [];
-        for (let r = 1; r <= roomsPerFloor; r++) {
-            apartments.push(String(f * 100 + r));
-        }
-        result.push({ floor: f, apartments });
-    }
-    return result;
-}
+/** Áreas de Agrícola Don Ricardo. Se usan al afiliarse y para sanciones por área. */
+export const ADR_AREAS: string[] = [
+    'Gerencia General',
+    'Administración y Finanzas',
+    'Contabilidad',
+    'Gestión Humana',
+    'Producción',
+    'Planta de Empaque',
+    'Frío',
+    'Calidad',
+    'Sanidad',
+    'Mantenimiento',
+    'Logística',
+    'Comercial',
+    'Agronomía / Campo',
+    'Ingeniería y Mejora Continua',
+    'Tecnologías de la Información',
+    'Seguridad y Salud en el Trabajo',
+    'Seguridad Patrimonial',
+    'Proyectos',
+    'Otra área',
+];
 
-/** Devuelve todos los departamentos en orden, planos. */
-export function flatApartments(floors: number, roomsPerFloor: number): string[] {
-    return generateStructure(floors, roomsPerFloor).flatMap(f => f.apartments);
-}
+/** Cargos sugeridos (el colaborador puede escribir uno distinto). */
+export const ADR_CARGOS_SUGERIDOS: string[] = [
+    'Gerente', 'Jefe', 'Coordinador', 'Supervisor', 'Analista',
+    'Especialista', 'Asistente', 'Practicante', 'Operario', 'Técnico',
+];
 
-/** Etiqueta amistosa para mostrar el tipo de comunidad. */
+/** Etiqueta amistosa del tipo de sede. */
 export function communityTypeLabel(type?: string): string {
-    switch (type) {
-        case 'CONDOMINIO': return 'Condominio';
-        case 'MULTIFAMILIAR': return 'Vivienda multifamiliar';
-        case 'EDIFICIO':
-        default: return 'Edificio';
+    switch (type as SedeType) {
+        case 'PLANTA': return 'Planta';
+        case 'FUNDO': return 'Fundo';
+        case 'OFICINA':
+        default: return 'Oficina';
     }
 }
 
-/** "Torre"/"Condominio"/"Edificio" en distintas vistas (idea Hoja1 UI). */
-export function buildingNoun(type?: string): string {
-    switch (type) {
-        case 'CONDOMINIO': return 'condominio';
-        case 'MULTIFAMILIAR': return 'vivienda';
-        case 'EDIFICIO':
-        default: return 'torre';
-    }
+/** Sustantivo genérico para la sede en textos. */
+export function buildingNoun(_type?: string): string {
+    return 'sede';
 }

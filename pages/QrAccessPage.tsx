@@ -69,7 +69,7 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
     useEffect(() => {
         if (!ownerPayload) return;
         setLoadingOwner(true);
-        generateQrDataUrl(ownerPayload, '#0a0a1a', '#ffffff')
+        generateQrDataUrl(ownerPayload, '#15110E', '#ffffff')
             .then(url => { setOwnerDataUrl(url); setLoadingOwner(false); })
             .catch(() => setLoadingOwner(false));
     }, [ownerPayload]);
@@ -77,7 +77,7 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
     // Renderiza QR del invitado como Data URL
     useEffect(() => {
         if (!guestPayload) return;
-        generateQrDataUrl(guestPayload, '#1e1b4b', '#fef3c7')
+        generateQrDataUrl(guestPayload, '#15110E', '#FDEBDD')
             .then(url => {
                 setGuestDataUrl(url);
                 pulse('#guest-qr-wrap');
@@ -93,7 +93,7 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
 
     const generateGuest = () => {
         if (!guestName.trim()) {
-            onToast('Indica el nombre del invitado');
+            onToast('Indica el nombre del visitante');
             return;
         }
         const issued = Math.floor(Date.now() / 1000);
@@ -110,7 +110,7 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
             exp: issued + GUEST_VALID_HOURS * 3600,
             jti,
         });
-        onToast(`✅ Acceso invitado generado · vence en ${GUEST_VALID_HOURS}h`);
+        onToast(`✅ Pase de visitante generado · vence en ${GUEST_VALID_HOURS}h`);
     };
 
     const fmtRemaining = (exp: number) => {
@@ -156,15 +156,15 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
                 Mi acceso
             </h2>
             <p style={{ fontSize: 13, color: 'var(--text-3)', marginBottom: 16 }}>
-                Muestra este QR en conserjería al entrar al edificio.
+                Muestra este QR en recepción o vigilancia al ingresar a la sede.
             </p>
 
             {/* QR del propietario */}
             <div ref={cardRef} className="card" style={{ padding: 18, textAlign: 'center', marginBottom: 16 }}>
-                <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--text-3)' }}>Acceso del propietario</div>
+                <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--text-3)' }}>Acceso del colaborador</div>
                 <h3 style={{ fontSize: 16, fontWeight: 800, marginBottom: 2 }}>{user.name}</h3>
                 <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
-                    Dpto {user.apartment || '?'} {user.tower ? `· ${user.tower}` : ''}
+                    {[user.cargo, user.apartment].filter(Boolean).join(' · ') || 'Área no registrada'}
                 </p>
 
                 <div style={{
@@ -181,7 +181,7 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
                     {loadingOwner ? (
                         <div style={{ width: 220, height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <span className="material-symbols-outlined"
-                                style={{ fontSize: 48, color: '#7C3AED', animation: 'spin 1s linear infinite' }}>
+                                style={{ fontSize: 48, color: 'var(--adr-verde)', animation: 'spin 1s linear infinite' }}>
                                 refresh
                             </span>
                         </div>
@@ -203,20 +203,20 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
                     </button>
                     {ownerDataUrl && (
                         <button className="btn btn-ghost btn-sm"
-                            onClick={() => downloadQr(ownerDataUrl, `roomly-acceso-${user.apartment || 'owner'}.png`)}>
+                            onClick={() => downloadQr(ownerDataUrl, `salas-adr-acceso-${(user.name || 'colaborador').replace(/\s+/g, '-')}.png`)}>
                             ⬇️ Guardar
                         </button>
                     )}
                 </div>
             </div>
 
-            {/* QR de invitado */}
-            <h3 style={{ fontSize: 15, fontWeight: 700, marginTop: 24, marginBottom: 8 }}>👤 Invitado de un solo uso</h3>
+            {/* QR de visitante */}
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginTop: 24, marginBottom: 8 }}>👤 Visitante de un solo uso</h3>
             <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
                 Genera un acceso temporal (válido {GUEST_VALID_HOURS} horas) para una visita o familiar.
             </p>
             <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-                <label style={{ fontSize: 12, color: 'var(--text-3)' }}>Nombre del invitado</label>
+                <label style={{ fontSize: 12, color: 'var(--text-3)' }}>Nombre del visitante</label>
                 <input
                     className="input"
                     placeholder="Ej: María Lopez"
@@ -225,7 +225,7 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
                     maxLength={60}
                 />
                 <button className="btn btn-primary btn-full" style={{ marginTop: 10 }} onClick={generateGuest}>
-                    Generar acceso invitado
+                    Generar pase de visitante
                 </button>
             </div>
 
@@ -235,25 +235,25 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
                     background: 'linear-gradient(135deg, rgba(245,158,11,0.15), rgba(124,58,237,0.05))',
                     border: '1px solid var(--warning)',
                 }}>
-                    <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Invitado: {guestPayload.guestName}</h4>
+                    <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Visitante: {guestPayload.guestName}</h4>
                     <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 10 }}>
-                        Asociado al Dpto {guestPayload.apartment || '?'}
+                        Invitado por el área {guestPayload.apartment || '?'}
                     </p>
                     <div style={{
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         padding: 10,
-                        background: '#fef3c7',
+                        background: '#FDEBDD',
                         borderRadius: 14,
                         minWidth: 236,
                         minHeight: 236,
                     }}>
                         {guestDataUrl ? (
-                            <img src={guestDataUrl} alt="QR acceso invitado"
+                            <img src={guestDataUrl} alt="QR pase de visitante"
                                 style={{ width: 220, height: 220, borderRadius: 8, display: 'block' }} />
                         ) : (
-                            <span className="material-symbols-outlined" style={{ fontSize: 48, color: '#d97706' }}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--adr-naranja)' }}>
                                 hourglass_empty
                             </span>
                         )}
@@ -266,9 +266,9 @@ export function QrAccessPage({ user, onBack, onToast }: QrAccessPageProps) {
                         <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }}
                             onClick={() => downloadQr(
                                 guestDataUrl,
-                                `roomly-invitado-${(guestPayload.guestName || 'guest').replace(/\s+/g, '-')}.png`
+                                `salas-adr-visitante-${(guestPayload.guestName || 'guest').replace(/\s+/g, '-')}.png`
                             )}>
-                            ⬇️ Guardar QR invitado
+                            ⬇️ Guardar QR del visitante
                         </button>
                     )}
                 </div>

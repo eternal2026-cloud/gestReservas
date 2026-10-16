@@ -1,20 +1,32 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Salas ADR
 
-# Run and deploy your AI Studio app
+Reserva de salas de reunión de Agrícola Don Ricardo. Usa la misma lógica que
+Roomly (gestReservas) con la identidad visual de ADR.
 
-This contains everything you need to run your app locally.
+| Roomly              | Salas ADR                          |
+|---------------------|------------------------------------|
+| Torre / comunidad   | Sede (oficina, planta o fundo)     |
+| Espacio común       | Sala de reunión                    |
+| Departamento        | Área del colaborador               |
+| —                   | Cargo del colaborador (nuevo)      |
+| —                   | Motivo de la reunión y asistentes (nuevo) |
+| Sanción por depto   | Sanción por área                   |
+| Cooldown por depto  | Cooldown por colaborador           |
 
-View your app in AI Studio: https://ai.studio/apps/drive/1fcLDK1ObzMRpTU-EuZXscPrbhL3JSXGX
+## Ejecutar en local
 
-## Run Locally
+1. `npm install`
+2. Crear `.env.local` con:
+   ```
+   VITE_SUPABASE_URL=...
+   VITE_SUPABASE_ANON_KEY=...
+   VITE_SITE_URL=https://tu-dominio   # opcional, por defecto el origen actual
+   ```
+3. `npm run dev`
 
-**Prerequisites:**  Node.js
+## Base de datos (Supabase)
 
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- Proyecto nuevo: ejecutar `supabase_schema.sql`, `supabase_qr_validation.sql`
+  y `supabase_storage_setup.sql`.
+- Proyecto que ya tenía el esquema de Roomly: ejecutar además
+  `supabase_salas_adr_migracion.sql`.

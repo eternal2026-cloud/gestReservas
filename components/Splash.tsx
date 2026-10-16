@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import anime from 'animejs';
+import { AdrMark } from './AdrLogo';
 
 interface SplashProps {
     onDone: () => void;
@@ -7,8 +8,8 @@ interface SplashProps {
 }
 
 /**
- * Splash inicial con logo + texto Roomly que se construye letra a letra,
- * una torre que crece piso a piso, y un fade-out al final.
+ * Splash inicial con el isotipo ADR + texto «Salas ADR» que se construye letra
+ * a letra, una barra tricolor ADR que crece, y un fade-out al final.
  */
 export function Splash({ onDone, minDuration = 1400 }: SplashProps) {
     const rootRef = useRef<HTMLDivElement>(null);
@@ -70,46 +71,42 @@ export function Splash({ onDone, minDuration = 1400 }: SplashProps) {
     return (
         <div ref={rootRef} style={{
             position: 'fixed', inset: 0, zIndex: 10000,
-            background: 'radial-gradient(circle at 50% 30%, #2a1656 0%, #0a0a1a 70%)',
+            background: 'radial-gradient(circle at 50% 30%, #2F2821 0%, #15110E 70%)',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             color: '#fff', overflow: 'hidden',
         }}>
             <div className="splash-logo" style={{
-                width: 96, height: 96, borderRadius: 24, background: 'linear-gradient(135deg, #7C3AED, #a78bfa)',
+                width: 112, height: 112, borderRadius: 28,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 20px 60px rgba(124,58,237,0.5)', opacity: 0, marginBottom: 18,
+                boxShadow: '0 20px 60px rgba(118,183,41,0.25)', opacity: 0, marginBottom: 18, overflow: 'hidden',
             }}>
-                <svg width="56" height="56" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 28V16L20 10L28 16V28" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M20 28V22" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                    <circle cx="20" cy="16" r="2" fill="white" />
-                </svg>
+                <AdrMark size={112} />
             </div>
 
             <div style={{ display: 'flex', gap: 0, marginBottom: 8 }}>
-                {'Roomly'.split('').map((c, i) => (
+                {'Salas ADR'.split('').map((c, i) => (
                     <span key={i} className="splash-letter" style={{
                         fontSize: 44, fontWeight: 800,
-                        background: 'linear-gradient(135deg, #fff 0%, #a78bfa 100%)',
+                        background: 'linear-gradient(135deg, #fff 0%, #76B729 100%)',
+                        whiteSpace: 'pre', minWidth: c === ' ' ? 12 : undefined,
                         WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
                         opacity: 0, display: 'inline-block',
                     }}>{c}</span>
                 ))}
             </div>
 
-            <div className="splash-tag" style={{ opacity: 0, fontSize: 14, color: '#a0a0c0' }}>
-                Tu comunidad, conectada
+            <div className="splash-tag" style={{ opacity: 0, fontSize: 14, color: '#C9BFB4' }}>
+                Reserva de salas de reunión · Agrícola Don Ricardo
             </div>
 
             <div style={{
                 display: 'flex', flexDirection: 'column-reverse', gap: 4,
                 marginTop: 28, alignItems: 'center',
             }}>
-                {Array.from({ length: 7 }).map((_, i) => (
+                {['#0097CE', '#EF7C3B', '#76B729'].map((color, i) => (
                     <div key={i} className="splash-floor" style={{
-                        width: `${36 + i * 6}px`, height: 6, borderRadius: 3, opacity: 0,
-                        background: 'linear-gradient(90deg, #7C3AED, #a78bfa)',
-                        boxShadow: '0 2px 6px rgba(124,58,237,0.4)',
+                        width: `${48 + i * 14}px`, height: 6, borderRadius: 3, opacity: 0,
+                        background: color,
                     }} />
                 ))}
             </div>

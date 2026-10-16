@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { PERU_PROVINCES, districtsOf, canonicalProvince, canonicalDistrict, normalizeLoc } from '../services/peruLocations';
 
 // ─── LocationPicker ───
-// Selector de ubicación para crear torres SIN errores de digitación:
+// Selector de ubicación para registrar sedes SIN errores de digitación:
 //  1. Buscador de direcciones (Nominatim/OpenStreetMap, limitado a Perú) con
 //     sugerencias seleccionables — el admin elige, no tipea.
 //  2. Mapa Leaflet con pin arrastrable: mover el pin re-geocodifica y

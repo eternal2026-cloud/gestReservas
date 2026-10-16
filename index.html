@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Roomly — Tu comunidad, conectada. Reserva espacios comunes de tu edificio." />
-    <title>Roomly — Tu comunidad, conectada</title>
+    <meta name="description" content="Salas ADR — Reserva de salas de reunión de Agrícola Don Ricardo." />
+    <title>Salas ADR — Reserva de salas de reunión</title>
     <link rel="icon" type="image/svg+xml" href="/logo.svg">
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#7C3AED">
+    <meta name="theme-color" content="#15110E">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -26,50 +26,54 @@
         :root {
             --font: 'Outfit', sans-serif;
 
-            /* Dark mode (default) */
-            --bg: #0a0a1a;
-            --bg-2: #12122a;
-            --surface: #1a1a3e;
-            --surface-2: #22224a;
-            --border: rgba(124, 58, 237, 0.15);
-            --border-2: rgba(124, 58, 237, 0.08);
+            /* Paleta ADR (Agrícola Don Ricardo) — modo oscuro por defecto */
+            --adr-verde: #76B729;
+            --adr-azul: #0097CE;
+            --adr-naranja: #EF7C3B;
+            --adr-marron: #5D4835;
+            --bg: #15110E;
+            --bg-2: #1D1814;
+            --surface: #26201A;
+            --surface-2: #2F2821;
+            --border: rgba(118, 183, 41, 0.16);
+            --border-2: rgba(118, 183, 41, 0.08);
             --text: #ffffff;
-            --text-2: #a0a0c0;
-            --text-3: #6b6b8a;
-            --primary: #7c3aed;
-            --primary-light: #a78bfa;
-            --primary-dark: #5b21b6;
-            --primary-glow: rgba(124, 58, 237, 0.25);
-            --accent: #06d6a0;
-            --accent-dark: #05b384;
-            --danger: #ef4444;
-            --warning: #f59e0b;
-            --success: #10b981;
-            --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-            --card-shadow-hover: 0 8px 40px rgba(124, 58, 237, 0.2);
-            --gradient-primary: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
-            --gradient-accent: linear-gradient(135deg, #06d6a0 0%, #34d399 100%);
-            --gradient-dark: linear-gradient(180deg, #0a0a1a 0%, #12122a 100%);
+            --text-2: #C9BFB4;
+            --text-3: #8C8075;
+            --primary: #5E9A1F;
+            --primary-light: #8FC844;
+            --primary-dark: #3F6E12;
+            --primary-glow: rgba(118, 183, 41, 0.22);
+            --accent: #0097CE;
+            --accent-dark: #007BA8;
+            --danger: #E5484D;
+            --warning: #EF7C3B;
+            --success: #76B729;
+            --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+            --card-shadow-hover: 0 8px 40px rgba(118, 183, 41, 0.18);
+            --gradient-primary: linear-gradient(135deg, #5E9A1F 0%, #76B729 100%);
+            --gradient-accent: linear-gradient(135deg, #0097CE 0%, #36B3E0 100%);
+            --gradient-dark: linear-gradient(180deg, #15110E 0%, #1D1814 100%);
         }
 
         [data-theme="light"] {
-            --bg: #f4f0ff;
-            --bg-2: #ede7ff;
+            --bg: #F5F6F1;
+            --bg-2: #EAEFE2;
             --surface: #ffffff;
-            --surface-2: #f8f5ff;
-            --border: rgba(124, 58, 237, 0.12);
-            --border-2: rgba(124, 58, 237, 0.06);
-            --text: #1a1a2e;
-            --text-2: #4a4a6a;
-            --text-3: #8a8aaa;
-            --primary: #7c3aed;
-            --primary-light: #a78bfa;
-            --primary-dark: #5b21b6;
-            --primary-glow: rgba(124, 58, 237, 0.12);
-            --accent: #06d6a0;
-            --accent-dark: #05b384;
-            --card-shadow: 0 4px 24px rgba(124, 58, 237, 0.08);
-            --card-shadow-hover: 0 8px 40px rgba(124, 58, 237, 0.12);
+            --surface-2: #F8FAF4;
+            --border: rgba(93, 72, 53, 0.14);
+            --border-2: rgba(93, 72, 53, 0.07);
+            --text: #15110E;
+            --text-2: #4A3F35;
+            --text-3: #85796E;
+            --primary: #5E9A1F;
+            --primary-light: #4E8619;
+            --primary-dark: #3F6E12;
+            --primary-glow: rgba(118, 183, 41, 0.14);
+            --accent: #0086B8;
+            --accent-dark: #006E97;
+            --card-shadow: 0 4px 24px rgba(93, 72, 53, 0.08);
+            --card-shadow-hover: 0 8px 40px rgba(93, 72, 53, 0.14);
         }
 
         /* ─── Reset ─── */
@@ -144,7 +148,7 @@
             }
 
             50% {
-                box-shadow: 0 0 40px var(--primary-glow), 0 0 60px rgba(124, 58, 237, 0.1);
+                box-shadow: 0 0 40px var(--primary-glow), 0 0 60px rgba(118, 183, 41, 0.1);
             }
         }
 
@@ -213,12 +217,12 @@
 
         .btn-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 25px rgba(124, 58, 237, 0.4);
+            box-shadow: 0 6px 25px rgba(118, 183, 41, 0.4);
         }
 
         .btn-accent {
             background: var(--gradient-accent);
-            color: #0a0a1a;
+            color: #15110E;
         }
 
         .btn-accent:hover {
@@ -305,7 +309,7 @@
         }
 
         .badge-accent {
-            background: rgba(6, 214, 160, 0.15);
+            background: rgba(0, 151, 206, 0.15);
             color: var(--accent);
         }
 
@@ -568,7 +572,7 @@
             height: 96px;
             margin: 0 auto 12px;
             display: block;
-            filter: drop-shadow(0 6px 20px rgba(124, 58, 237, 0.45));
+            filter: drop-shadow(0 6px 20px rgba(118, 183, 41, 0.35));
         }
 
         .login-logo h1 {

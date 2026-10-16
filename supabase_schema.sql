@@ -1,5 +1,7 @@
 -- =====================================================
--- Roomly v2 — Supabase Schema (Hardened)
+-- Salas ADR — Supabase Schema (basado en Roomly v2 Hardened)
+-- Reserva de salas de reunión de Agrícola Don Ricardo.
+-- communities = sedes · amenities = salas · users.apartment = área · users.cargo = cargo
 -- Run this in the SQL Editor of su Supabase Dashboard
 -- =====================================================
 -- Cambios vs versión previa:
@@ -12,14 +14,14 @@
 --   • UNIQUE(community_id, role='ADMIN') vía índice parcial (un admin por torre)
 -- =====================================================
 
--- ─── Torres / Comunidades ───
+-- ─── Sedes ADR (tabla communities) ───
 CREATE TABLE IF NOT EXISTS communities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   address TEXT,
   district TEXT,
   province TEXT,
-  community_type TEXT DEFAULT 'EDIFICIO' CHECK (community_type IN ('EDIFICIO','CONDOMINIO','MULTIFAMILIAR')),
+  community_type TEXT DEFAULT 'OFICINA' CHECK (community_type IN ('OFICINA','PLANTA','FUNDO')),
   map_lat NUMERIC,
   map_lng NUMERIC,
   admin_email TEXT NOT NULL,
@@ -44,7 +46,8 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT DEFAULT 'USER' CHECK (role IN ('USER','ADMIN','SUPER_ADMIN')),
   community_id UUID REFERENCES communities(id),
   tower TEXT,
-  apartment TEXT,
+  apartment TEXT,            -- Área del colaborador
+  cargo TEXT CHECK (char_length(cargo) <= 80),
   avatar_url TEXT,
   points INT DEFAULT 0,
   status TEXT DEFAULT 'ACTIVO' CHECK (status IN ('ACTIVO','INACTIVO')),
@@ -56,17 +59,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_one_admin_per_community
   ON users(community_id)
   WHERE role = 'ADMIN' AND status = 'ACTIVO';
 
--- Un vecino único por (comunidad, torre, depto) — antes se filtraban duplicados
--- solo en la UI; ahora la BD bloquea el caso edge (dos solicitudes aprobadas
--- en paralelo, edición manual del rol, etc).
-CREATE UNIQUE INDEX IF NOT EXISTS users_one_per_apartment
-  ON users(community_id, tower, apartment)
-  WHERE community_id IS NOT NULL
-    AND tower IS NOT NULL
-    AND apartment IS NOT NULL
-    AND status = 'ACTIVO';
+-- En Salas ADR varios colaboradores comparten área: NO existe el índice único
+-- users_one_per_apartment de Roomly.
+DROP INDEX IF EXISTS users_one_per_apartment;
 
--- ─── Espacios comunes / Amenidades ───
+-- ─── Salas de reunión (tabla amenities) ───
 CREATE TABLE IF NOT EXISTS amenities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   community_id UUID REFERENCES communities(id) ON DELETE CASCADE,
@@ -90,6 +87,8 @@ CREATE TABLE IF NOT EXISTS reservations (
   amenity_id UUID REFERENCES amenities(id) ON DELETE CASCADE,
   date DATE NOT NULL,
   time_slot TEXT NOT NULL,
+  motivo TEXT CHECK (char_length(motivo) <= 200),   -- Motivo de la reunión
+  attendees INT CHECK (attendees IS NULL OR attendees > 0),
   status TEXT DEFAULT 'ACTIVA' CHECK (status IN ('ACTIVA','CANCELADA','FINALIZADA')),
   grade TEXT DEFAULT 'PENDIENTE' CHECK (grade IN ('PENDIENTE','CUMPLIDA','INCUMPLIDA')),
   compliance_pct INT DEFAULT 100 CHECK (compliance_pct BETWEEN 0 AND 100),
@@ -138,8 +137,9 @@ CREATE TABLE IF NOT EXISTS join_requests (
   community_id UUID REFERENCES communities(id) ON DELETE CASCADE,
   user_email TEXT NOT NULL,
   user_name TEXT NOT NULL,
-  unit TEXT,
+  unit TEXT,                 -- Área solicitada
   tower TEXT,
+  cargo TEXT CHECK (char_length(cargo) <= 80),
   status TEXT DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE','APROBADA','RECHAZADA')),
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -542,3 +542,22 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.email_has_account(text) FROM public;
 GRANT EXECUTE ON FUNCTION public.email_has_account(text) TO anon, authenticated;
+
+-- =====================================================
+-- Endurecimiento (aplicado en el proyecto salas-adr)
+-- Los helpers SECURITY DEFINER solo los ejecuta un usuario autenticado;
+-- email_has_account sigue abierto a anon (se usa en login/registro).
+-- =====================================================
+DO $$
+DECLARE f TEXT;
+BEGIN
+  FOREACH f IN ARRAY ARRAY[
+    'public.my_user_id()', 'public.my_role()', 'public.my_community_id()', 'public.is_super_admin()',
+    'public.is_admin_of(uuid)', 'public.is_member_of(uuid)',
+    'public.award_points_to_user(uuid, uuid, text, integer, text)'
+  ] LOOP
+    EXECUTE format('ALTER FUNCTION %s SET search_path = public', f);
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC, anon', f);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticated', f);
+  END LOOP;
+END $$;

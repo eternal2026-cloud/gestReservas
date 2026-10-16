@@ -312,7 +312,7 @@ export async function gradeReservation(reservationId: string, grade: 'CUMPLIDA' 
 export async function getAllReservationsForAudit(communityId?: string): Promise<Reservation[]> {
     let query = supabase
         .from('reservations')
-        .select('*, amenity:amenities(*), user:users(name, email, community_id)')
+        .select('*, amenity:amenities(*), user:users(name, email, community_id, apartment, cargo)')
         .order('date', { ascending: false });
     const { data, error } = await query;
     if (error) throw error;
@@ -417,31 +417,9 @@ export async function addComment(comment: Partial<Comment>): Promise<Comment> {
 // ─── Join Requests ───
 
 export async function createJoinRequest(request: Partial<JoinRequest>): Promise<JoinRequest> {
-    // Candado 1: ¿alguien ya vive en esta torre+depto?
-    if (request.community_id && request.unit) {
-        const occupant = await getApartmentOccupant(
-            request.community_id, request.tower || '', request.unit,
-        );
-        if (occupant && occupant.email !== request.user_email) {
-            throw new Error(
-                `Ese depto ya está registrado por ${occupant.name || occupant.email}. ` +
-                `Elige otro o contacta al administrador.`
-            );
-        }
-        // Candado 2: ¿hay otra solicitud PENDIENTE para el mismo depto?
-        const pending = await getPendingApartmentClaims(request.community_id);
-        const conflict = pending.find(p =>
-            (p.unit || '').trim() === (request.unit || '').trim() &&
-            (p.tower || '').trim() === (request.tower || '').trim() &&
-            p.user_email !== request.user_email
-        );
-        if (conflict) {
-            throw new Error(
-                `Ya existe una solicitud pendiente para ese depto (${conflict.user_email}). ` +
-                `Espera la decisión del admin o elige otro.`
-            );
-        }
-    }
+    // En Salas ADR varios colaboradores comparten la misma área, así que ya no
+    // hay candado de "depto ocupado". La BD sigue limitando a una solicitud
+    // PENDIENTE por correo y sede (join_requests_one_pending).
     const { data, error } = await supabase
         .from('join_requests')
         .insert(request)
@@ -470,19 +448,6 @@ export async function approveJoinRequest(requestId: string): Promise<void> {
         .single();
     if (fetchError) throw fetchError;
 
-    // Candado: no aprobar si otro vecino ya ocupa ese depto en la torre
-    if (request?.community_id && request?.unit) {
-        const occupant = await getApartmentOccupant(
-            request.community_id, request.tower || '', request.unit,
-        );
-        if (occupant && occupant.email !== request.user_email) {
-            throw new Error(
-                `No se puede aprobar: ${occupant.name || occupant.email} ya está registrado en ` +
-                `${request.tower ? request.tower + ' · ' : ''}Dpto ${request.unit}.`
-            );
-        }
-    }
-
     // Update request status
     const { error: updateError } = await supabase
         .from('join_requests')
@@ -497,6 +462,7 @@ export async function approveJoinRequest(requestId: string): Promise<void> {
             community_id: request.community_id,
             tower: request.tower,
             apartment: request.unit,
+            ...(request.cargo ? { cargo: request.cargo } : {}),
         });
     }
 }
@@ -690,11 +656,10 @@ export async function getAnalytics(communityId?: string) {
 
 export async function seedTestData(communityId: string): Promise<string> {
     const amenityNames = [
-        { name: 'Piscina', type: 'PISCINA', capacity: 30, desc: 'Piscina comunitaria con área de descanso' },
-        { name: 'Gimnasio', type: 'GIMNASIO', capacity: 15, desc: 'Equipamiento moderno y amplio espacio' },
-        { name: 'Área de Parrillas', type: 'PARRILLA', capacity: 20, desc: 'Zona BBQ con mesas y bancas' },
-        { name: 'Salón de Eventos', type: 'SALON', capacity: 50, desc: 'Salón equipado para eventos sociales' },
-        { name: 'Coworking', type: 'COWORKING', capacity: 10, desc: 'Espacio de trabajo compartido con WiFi' },
+        { name: 'Sala de Directorio', type: 'DIRECTORIO', capacity: 14, desc: 'Mesa ejecutiva, pantalla y videoconferencia' },
+        { name: 'Sala de Reuniones 1', type: 'REUNIONES', capacity: 8, desc: 'Sala estándar con TV y pizarra' },
+        { name: 'Sala de Capacitación', type: 'CAPACITACION', capacity: 30, desc: 'Proyector, sonido y carpetas' },
+        { name: 'Sala de Videoconferencia', type: 'VIDEOCONFERENCIA', capacity: 6, desc: 'Cámara, micrófono y pantalla para Teams' },
     ];
 
     for (const a of amenityNames) {
@@ -881,29 +846,27 @@ export async function upsertRestriction(r: Partial<Restriction>): Promise<Restri
     return data;
 }
 
-// ─── Última reserva del dpto en una amenidad (para cooldown) ───
-export async function getLastReservationByApartment(
-    communityId: string, apartment: string, amenityId: string,
+// ─── Última reserva del colaborador en una sala (para cooldown) ───
+export async function getLastReservationByUser(
+    userId: string, amenityId: string,
 ): Promise<Reservation | null> {
-    // Trae todas las reservas de la amenidad y filtra por dpto del usuario dueño.
     const { data, error } = await supabase
         .from('reservations')
-        .select('*, user:users(community_id, apartment)')
+        .select('*')
         .eq('amenity_id', amenityId)
+        .eq('user_id', userId)
         .eq('status', 'ACTIVA')
-        .order('date', { ascending: false });
+        .order('date', { ascending: false })
+        .limit(1);
     if (error) return null;
-    const match = (data || []).find((r: any) =>
-        r.user?.community_id === communityId && r.user?.apartment === apartment,
-    );
-    return match || null;
+    return (data && data[0]) || null;
 }
 
 // ─── Motor de elegibilidad ───
 // Combina:
 //   • horizonte de días (max fecha reservable)
-//   • cooldown desde la última reserva del dpto
-//   • sanciones activas del dpto sobre esta amenidad
+//   • cooldown desde la última reserva del colaborador en la sala
+//   • sanciones activas del área sobre esta sala
 // y devuelve restricciones para la UI del BookingPage.
 export interface Eligibility {
     minDate: string;        // YYYY-MM-DD
@@ -924,7 +887,7 @@ export async function getEligibility(
     let canReserve = true;
 
     if (!user.community_id || !user.apartment) {
-        return { minDate: todayISO, maxDate: todayISO, blockedDates: [], reasons: ['Falta cartilla'], canReserve: false };
+        return { minDate: todayISO, maxDate: todayISO, blockedDates: [], reasons: ['Debes estar afiliado a una sede con tu área registrada'], canReserve: false };
     }
 
     // 1) Restricción de la amenidad (horizonte + cooldown)
@@ -937,9 +900,9 @@ export async function getEligibility(
     maxDate.setDate(maxDate.getDate() + horizonDays);
     const maxDateISO = maxDate.toISOString().split('T')[0];
 
-    // 2) Cooldown desde la última reserva activa del dpto
+    // 2) Cooldown desde la última reserva activa del colaborador
     if (cooldownDays > 0 || cooldownHours > 0) {
-        const last = await getLastReservationByApartment(user.community_id, user.apartment, amenityId);
+        const last = await getLastReservationByUser(user.id, amenityId);
         if (last) {
             const lastDate = new Date(last.date + 'T00:00:00');
             const cutoff = new Date(lastDate);
@@ -953,7 +916,7 @@ export async function getEligibility(
                 d.setDate(d.getDate() + 1);
             }
             reasons.push(
-                `Tu dpto ${user.apartment} reservó esta amenidad recientemente. Próxima fecha disponible: ${cutoff.toISOString().split('T')[0]}.`
+                `Ya reservaste esta sala recientemente. Próxima fecha disponible: ${cutoff.toISOString().split('T')[0]}.`
             );
         }
         // Si NO existe última reserva, el PDF dice "el sistema asume que la última fue ayer".
@@ -978,7 +941,7 @@ export async function getEligibility(
             blockedDates.push(d.toISOString().split('T')[0]);
             d.setDate(d.getDate() + 1);
         }
-        reasons.push(`Sanción activa del ${s.start_date} al ${s.end_date}${s.reason ? ` — ${s.reason}` : ''}.`);
+        reasons.push(`Sanción activa para el área ${s.apartment} del ${s.start_date} al ${s.end_date}${s.reason ? ` — ${s.reason}` : ''}.`);
     });
 
     // Si todas las fechas del horizonte están bloqueadas, no puede reservar

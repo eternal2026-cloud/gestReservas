@@ -1,21 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import * as api from '../services/api';
 import type { Amenity, Sanction, Restriction, User } from '../types';
-import { generateStructure, flatApartments } from '../services/structure';
+import { ADR_AREAS } from '../services/structure';
 import { useAnimeStagger } from '../components/useAnime';
 import { Loader } from '../components/Loader';
 
 interface SanctionsPageProps {
     user: User;
-    communityFloors: number;
-    communityRooms: number;
     onBack: () => void;
     onToast: (msg: string) => void;
 }
 
 type Tab = 'sanctions' | 'restrictions';
 
-export function SanctionsPage({ user, communityFloors, communityRooms, onBack, onToast }: SanctionsPageProps) {
+export function SanctionsPage({ user, onBack, onToast }: SanctionsPageProps) {
     const [tab, setTab] = useState<Tab>('sanctions');
     const [amenities, setAmenities] = useState<Amenity[]>([]);
     const [sanctions, setSanctions] = useState<Sanction[]>([]);
@@ -52,7 +50,6 @@ export function SanctionsPage({ user, communityFloors, communityRooms, onBack, o
 
     useEffect(() => { refresh(); /* eslint-disable-next-line */ }, []);
 
-    const apartments = flatApartments(communityFloors || 10, communityRooms || 4);
     const todayISO = new Date().toISOString().split('T')[0];
 
     const submitSanction = async () => {
@@ -82,7 +79,7 @@ export function SanctionsPage({ user, communityFloors, communityRooms, onBack, o
             await api.logAudit('SANCTION_CREATED', 'sanction', created.id, { apartment: newApt, amenity_id: newAmenity });
             setSanctions(prev => [created, ...prev]);
             setNewApt(''); setNewAmenity(''); setNewStart(''); setNewEnd(''); setNewReason('');
-            onToast('✅ Sanción aplicada — el dpto recibirá notificación');
+            onToast('✅ Sanción aplicada — el área verá el bloqueo al reservar');
         } catch (e: any) {
             onToast('Error: ' + (e.message || 'No se pudo crear'));
         }
@@ -152,18 +149,14 @@ export function SanctionsPage({ user, communityFloors, communityRooms, onBack, o
                             <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>➕ Nueva sanción</h4>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
                                 <div>
-                                    <label style={{ fontSize: 12, color: 'var(--text-3)' }}>Departamento</label>
+                                    <label style={{ fontSize: 12, color: 'var(--text-3)' }}>Área</label>
                                     <select className="input" value={newApt} onChange={e => setNewApt(e.target.value)}>
                                         <option value="">Selecciona…</option>
-                                        {generateStructure(communityFloors || 10, communityRooms || 4).map(f => (
-                                            <optgroup key={f.floor} label={`Piso ${f.floor}`}>
-                                                {f.apartments.map(a => <option key={a} value={a}>{a}</option>)}
-                                            </optgroup>
-                                        ))}
+                                        {ADR_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
                                     </select>
                                 </div>
                                 <div>
-                                    <label style={{ fontSize: 12, color: 'var(--text-3)' }}>Espacio</label>
+                                    <label style={{ fontSize: 12, color: 'var(--text-3)' }}>Sala</label>
                                     <select className="input" value={newAmenity} onChange={e => setNewAmenity(e.target.value)}>
                                         <option value="">Selecciona…</option>
                                         {amenities.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -180,7 +173,7 @@ export function SanctionsPage({ user, communityFloors, communityRooms, onBack, o
                             </div>
                             <label style={{ fontSize: 12, color: 'var(--text-3)' }}>Motivo (≤150)</label>
                             <textarea className="input" rows={2} maxLength={150}
-                                placeholder="Ej: Falta de cumplimiento en última reserva (Compliance 30%)"
+                                placeholder="Ej: Sala no liberada / reserva no usada (cumplimiento 30%)"
                                 value={newReason} onChange={e => setNewReason(e.target.value)} />
                             <p style={{ fontSize: 11, color: 'var(--text-3)', textAlign: 'right' }}>{newReason.length}/150</p>
                             <button className="btn btn-danger btn-full" disabled={busy === 'create'}
@@ -201,7 +194,7 @@ export function SanctionsPage({ user, communityFloors, communityRooms, onBack, o
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                                         <div>
                                             <h4 style={{ fontSize: 14, fontWeight: 700 }}>
-                                                Dpto {s.apartment} · {(s as any).amenity?.name || 'Espacio'}
+                                                {s.apartment} · {(s as any).amenity?.name || 'Sala'}
                                             </h4>
                                             <p style={{ fontSize: 12, color: 'var(--text-3)' }}>
                                                 {s.start_date} → {s.end_date}
@@ -225,10 +218,10 @@ export function SanctionsPage({ user, communityFloors, communityRooms, onBack, o
                     <>
                         <p className="sx-row" style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 14 }}>
                             Define cuántos días máximo se puede reservar a futuro (horizonte) y cuánto tiempo
-                            debe esperar un dpto entre dos reservas (cooldown).
+                            debe esperar un colaborador entre dos reservas de la misma sala (cooldown).
                         </p>
                         {amenities.length === 0 ? (
-                            <p style={{ color: 'var(--text-3)' }}>Sin espacios creados aún.</p>
+                            <p style={{ color: 'var(--text-3)' }}>Sin salas creadas aún.</p>
                         ) : amenities.map(a => {
                             const r = restrictions.find(x => x.amenity_id === a.id);
                             const horizon = r?.horizon_days ?? 30;
