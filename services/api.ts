@@ -20,6 +20,7 @@ export function friendlyError(e: any): string {
     if (low.includes('same_password') || low.includes('should be different')) return 'La nueva contraseña debe ser distinta a la anterior';
     if (msg.includes('FUERA_DE_VENTANA:')) return msg.split('FUERA_DE_VENTANA:')[1].trim();
     if (msg.includes('LIMITE_DIARIO:')) return msg.split('LIMITE_DIARIO:')[1].trim();
+    if (msg.includes('HORARIO_NO_DISPONIBLE:')) return msg.split('HORARIO_NO_DISPONIBLE:')[1].trim();
     if (low.includes('reservations_no_collision') || low.includes('duplicate key')) return 'Ese horario acaba de ser reservado por otra persona. Elige otro.';
     return msg || 'Error inesperado';
 }

@@ -5,25 +5,15 @@ import type { SedeType } from '../types';
 
 /** Áreas de Agrícola Don Ricardo. Se usan al afiliarse y para sanciones por área. */
 export const ADR_AREAS: string[] = [
-    'Gerencia General',
-    'Administración y Finanzas',
-    'Contabilidad',
-    'Gestión Humana',
+    'Ingeniería de Procesos',
+    'Sanitización',
+    'Manejo de la Información',
+    'Despacho',
     'Producción',
-    'Planta de Empaque',
-    'Frío',
-    'Calidad',
-    'Sanidad',
     'Mantenimiento',
-    'Logística',
-    'Comercial',
-    'Agronomía / Campo',
-    'Ingeniería y Mejora Continua',
-    'Tecnologías de la Información',
-    'Seguridad y Salud en el Trabajo',
-    'Seguridad Patrimonial',
-    'Proyectos',
-    'Otra área',
+    'Servicios Generales',
+    'Calidad',
+    'Almacén',
 ];
 
 /** Cargos sugeridos (el colaborador puede escribir uno distinto). */
@@ -58,10 +48,11 @@ export const ROOM_EQUIPMENT: { key: string; label: string; icon: string }[] = [
     { key: 'TELEFONO', label: 'Teléfono', icon: 'call' },
 ];
 
-/** Horarios reservables (bloques de 1 h, sin el refrigerio de 13:00). */
+/** Horarios reservables (bloques de 1 h, sin el refrigerio de 13:00 ni 07:00-08:00 / 18:00-19:00).
+ *  El trigger reservations_check_rules acepta solo esta misma lista. */
 export const TIME_SLOTS: string[] = [
-    '07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00',
-    '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00', '19:00-20:00',
+    '08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00',
+    '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '19:00-20:00',
 ];
 
 /** Fecha y hora actual en Perú (UTC-5, sin horario de verano). */
