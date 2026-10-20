@@ -13,7 +13,7 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
         rel="stylesheet" />
 
     <!-- Material Icons -->
@@ -24,7 +24,7 @@
     <style>
         /* ─── CSS Variables ─── */
         :root {
-            --font: 'Outfit', sans-serif;
+            --font: 'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif;
 
             /* Paleta ADR (Agrícola Don Ricardo) — modo oscuro por defecto */
             --adr-verde: #76B729;
@@ -93,6 +93,15 @@
             transition: background 0.4s ease, color 0.4s ease;
             -webkit-font-smoothing: antialiased;
             overflow-x: hidden;
+        }
+
+        h1, h2, h3, h4 {
+            letter-spacing: -0.015em;
+        }
+
+        input, select, textarea, button {
+            font-family: var(--font);
+            font-variant-numeric: tabular-nums;
         }
 
         #root {

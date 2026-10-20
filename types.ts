@@ -32,7 +32,9 @@ export type UserRole = 'USER' | 'ADMIN' | 'SUPER_ADMIN';
 export interface User {
     id: string;
     auth_id?: string;
-    email: string;
+    email: string;            // Correo técnico (usuario@salas-adr.interno) o real en cuentas antiguas
+    username?: string;        // Usuario de ingreso (lo asigna el admin)
+    must_change_password?: boolean; // Clave temporal: debe cambiarla al entrar
     name: string;
     dni?: string;
     phone?: string;
@@ -56,9 +58,13 @@ export interface Amenity {
     name: string;
     capacity: number;
     description?: string;
-    image_url?: string;
+    image_url?: string;       // Foto de portada
+    gallery?: string[];       // Fotos adicionales de la sala
     amenity_type: string;
     points_reward: number;
+    location?: string;        // Ej: "Oficina Planta Don Carlos · 2.º piso"
+    equipment?: string[];     // Ej: ['TV', 'PROYECTOR']
+    is_active?: boolean;
     created_at: string;
 }
 
@@ -178,6 +184,7 @@ export type AppView =
     | 'reset-password'
     | 'home'
     | 'amenities'
+    | 'availability'
     | 'amenity-detail'
     | 'booking'
     | 'my-reservations'
@@ -192,8 +199,7 @@ export type AppView =
     | 'admin-requests'
     | 'admin-analytics'
     | 'super-admin'
-    | 'qr-access'
-    | 'qr-validate';
+    | 'change-password';
 
 export interface PointAction {
     action: string;

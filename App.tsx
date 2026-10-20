@@ -2,16 +2,18 @@ import React, { useState, useEffect, useRef, createContext, useContext } from 'r
 import * as api from './services/api';
 import type { User, Community, Amenity, Reservation, Post, ThemeMode, AppView } from './types';
 import { getUserLevel, POINT_ACTIONS } from './types';
-import { supabase, SITE_URL } from './services/supabase';
+import { supabase } from './services/supabase';
 import { Loader } from './components/Loader';
 import { ViewTransition } from './components/ViewTransition';
 import { Splash } from './components/Splash';
 import { SuperAdminPage } from './pages/SuperAdminPage';
-import { LocationPicker, EMPTY_LOCATION } from './components/LocationPicker';
 import { SanctionsPage } from './pages/SanctionsPage';
-import { QrAccessPage } from './pages/QrAccessPage';
-import { QrValidatePage } from './pages/QrValidatePage';
-import { ADR_AREAS, ADR_CARGOS_SUGERIDOS, communityTypeLabel } from './services/structure';
+import { UsersManager } from './components/UsersManager';
+import { IconForum, IconHeart, IconComment, IconPhoto, IconBug, IconClose, IconSend, IconMegaphone } from './components/Icons';
+import {
+    ADR_AREAS, ADR_CARGOS_SUGERIDOS, ROOM_TYPES, ROOM_EQUIPMENT, TIME_SLOTS,
+    roomTypeLabel, peruNow, peruTodayISO, MAX_SLOTS_PER_DAY, bookingMaxDateISO, addDaysISO, shortDayLabel,
+} from './services/structure';
 import { AdrMark, AdrLogo } from './components/AdrLogo';
 import anime from 'animejs';
 
@@ -30,6 +32,24 @@ interface AppCtx {
 }
 const Ctx = createContext<AppCtx>({} as AppCtx);
 const useApp = () => useContext(Ctx);
+
+// En ADR el Super Admin también administra salas.
+const isAdminRole = (u: User | null) => u?.role === 'ADMIN' || u?.role === 'SUPER_ADMIN';
+const DEFAULT_ROOM_IMG = 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=800';
+
+// Chips de equipamiento de una sala
+function EquipmentChips({ equipment, small }: { equipment?: string[]; small?: boolean }) {
+    if (!equipment || equipment.length === 0) return null;
+    return (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {ROOM_EQUIPMENT.filter(e => equipment.includes(e.key)).map(e => (
+                <span key={e.key} className="badge badge-primary" style={{ fontSize: small ? 10 : 11, gap: 4 }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: small ? 12 : 14 }}>{e.icon}</span>{e.label}
+                </span>
+            ))}
+        </div>
+    );
+}
 
 // Cuando LoginPage maneja el alta/inicio de sesión manualmente, el listener
 // global de auth no debe duplicar la carga/creación del perfil.
@@ -93,12 +113,8 @@ export default function App() {
     const userRef = useRef<User | null>(null);
     useEffect(() => { userRef.current = user; }, [user]);
 
-    // El enlace de recuperación llega con `type=recovery` en el hash; lo
-    // marcamos para no saltar al home antes de que el usuario cambie su clave.
-    const recoveryMode = useRef(window.location.hash.includes('type=recovery'));
-
-    // ── Captura la sesión al volver de los enlaces de email (confirmación o
-    // recuperación) y al recargar la página con sesión activa. ──
+    // ── Restaura la sesión al recargar la página. Las cuentas las crea el
+    // admin (Edge Function admin-usuarios), así que aquí no se crean perfiles.
     // IMPORTANTE: no usar await dentro del callback de onAuthStateChange:
     // supabase-js mantiene un lock mientras corre el callback y cualquier
     // consulta interna se bloquea (deadlock: la app se cuelga al iniciar
@@ -106,11 +122,6 @@ export default function App() {
     useEffect(() => {
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             (event, session) => {
-                if (event === 'PASSWORD_RECOVERY') {
-                    recoveryMode.current = true;
-                    setView('reset-password');
-                    return;
-                }
                 if (event === 'SIGNED_OUT') {
                     checkedRejections.current = false;
                     setUser(null);
@@ -122,22 +133,10 @@ export default function App() {
                     setTimeout(async () => {
                         if (userRef.current || manualAuthInProgress) return;
                         try {
-                            let profile = await api.getUserByAuthId(authUser.id);
-                            if (!profile) profile = await api.getUserByEmail(authUser.email ?? '');
-                            if (!profile) {
-                                profile = await api.createUserProfile({
-                                    auth_id: authUser.id,
-                                    email: authUser.email ?? '',
-                                    name: authUser.user_metadata?.name || (authUser.email ?? '').split('@')[0],
-                                    cargo: authUser.user_metadata?.cargo || undefined,
-                                    role: 'USER',
-                                    points: 0,
-                                    status: 'ACTIVO',
-                                });
-                            }
+                            const profile = await api.getUserByAuthId(authUser.id);
+                            if (!profile || profile.status !== 'ACTIVO') { await supabase.auth.signOut(); return; }
                             setUser(profile);
-                            if (recoveryMode.current) setView('reset-password');
-                            else setView(v => v === 'login' ? 'home' : v);
+                            setView(v => profile.must_change_password ? 'change-password' : v === 'login' ? 'home' : v);
                         } catch (e) {
                             console.error('No se pudo cargar el perfil:', e);
                         }
@@ -155,29 +154,24 @@ export default function App() {
         <Ctx.Provider value={ctx}>
             {!splashDone && <Splash onDone={() => setSplashDone(true)} />}
             <div className="app-container">
-                {view === 'login' ? <LoginPage /> : view === 'reset-password' ? <ResetPasswordPage recoveryMode={recoveryMode} /> : (
+                {view === 'login' ? <LoginPage /> : view === 'change-password' && user?.must_change_password ? <ChangePasswordPage forced /> : (
                     <>
                         <TopBar />
                         <div className="main-content">
                             <ViewTransition viewKey={view} direction={view === 'home' ? 'scale' : 'up'}>
                                 {view === 'home' && <HomePage />}
                                 {view === 'amenities' && <AmenitiesPage />}
+                                {view === 'availability' && <AvailabilityPage />}
                                 {view === 'amenity-detail' && <AmenityDetailPage />}
                                 {view === 'booking' && <BookingPage />}
                                 {view === 'my-reservations' && <MyReservationsPage />}
                                 {view === 'community' && <CommunityPage />}
                                 {view === 'leaderboard' && <LeaderboardPage />}
                                 {view === 'profile' && <ProfilePage />}
-                                {view === 'join-community' && <JoinCommunityPage />}
                                 {view === 'admin' && <AdminPage />}
+                                {view === 'change-password' && <ChangePasswordPage />}
                                 {view === 'super-admin' && user?.role === 'SUPER_ADMIN' && (
-                                    <SuperAdminPage onBack={() => go('home')} onToast={toast} />
-                                )}
-                                {view === 'qr-access' && user && (
-                                    <QrAccessPage user={user} onBack={() => go('home')} onToast={toast} />
-                                )}
-                                {view === 'qr-validate' && user && (user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') && (
-                                    <QrValidatePage user={user} onBack={() => go('admin')} onToast={toast} />
+                                    <SuperAdminPage me={user} onBack={() => go('home')} onToast={toast} />
                                 )}
                             </ViewTransition>
                         </div>
@@ -218,7 +212,7 @@ function TopBar() {
                 <button className="icon-btn" onClick={toggleTheme}>
                     <span className="material-symbols-outlined">{theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
                 </button>
-                {user?.role === 'ADMIN' && (
+                {isAdminRole(user) && (
                     <button className="icon-btn" onClick={() => go('admin')} title="Panel Admin">
                         <span className="material-symbols-outlined">admin_panel_settings</span>
                     </button>
@@ -241,8 +235,8 @@ function BottomNav() {
     const items: { icon: string; label: string; view: AppView; needsCommunity?: boolean }[] = [
         { icon: 'home', label: 'Inicio', view: 'home' },
         { icon: 'meeting_room', label: 'Salas', view: 'amenities', needsCommunity: true },
+        { icon: 'view_timeline', label: 'Agenda', view: 'availability', needsCommunity: true },
         { icon: 'calendar_month', label: 'Reservas', view: 'my-reservations', needsCommunity: true },
-        { icon: 'forum', label: 'Muro', view: 'community' },
         { icon: 'person', label: 'Perfil', view: 'profile' },
     ];
     return (
@@ -260,18 +254,15 @@ function BottomNav() {
 }
 
 // ─── LoginPage ───
+// Usuario + contraseña (estilo Integra Operaciones). Sin registro ni correos:
+// el admin crea la cuenta y restablece la clave cuando alguien la olvida.
 function LoginPage() {
-    const { setUser, go, toast } = useApp();
-    const [email, setEmail] = useState('');
+    const { setUser, go } = useApp();
+    const [usuario, setUsuario] = useState('');
     const [password, setPassword] = useState('');
-    const [name, setName] = useState('');
-    const [cargo, setCargo] = useState('');
-    const [isRegister, setIsRegister] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [emailSent, setEmailSent] = useState(false);
-    const [showRecovery, setShowRecovery] = useState(false);
-    const [recoveryEmail, setRecoveryEmail] = useState('');
+    const [showHelp, setShowHelp] = useState(false);
 
     // Animación de entrada visible al cargar
     const cardRef = useRef<HTMLDivElement>(null);
@@ -279,20 +270,12 @@ function LoginPage() {
         if (!cardRef.current) return;
         const tl = anime.timeline({ easing: 'easeOutCubic' });
         tl.add({
-            targets: cardRef.current.querySelectorAll('.tower-floor'),
-            opacity: [0, 1],
-            translateY: [40, 0],
-            scaleX: [0.3, 1],
-            delay: anime.stagger(60, { from: 'last' }),
-            duration: 700,
-        })
-        .add({
             targets: cardRef.current.querySelector('.login-logo svg'),
             scale: [0, 1],
             rotate: [-180, 0],
             duration: 800,
             easing: 'spring(1, 80, 10, 0)',
-        }, '-=600')
+        })
         .add({
             targets: cardRef.current.querySelector('.login-logo h1'),
             opacity: [0, 1],
@@ -318,34 +301,7 @@ function LoginPage() {
             opacity: [0, 0.7],
             duration: 800,
         }, '-=600');
-    }, [emailSent, showRecovery, isRegister]);
-
-    const handleRecovery = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        setError('');
-        try {
-            // Supabase finge éxito aunque el correo no exista (anti-enumeración);
-            // verificamos antes para avisar al vecino con claridad.
-            const { data: exists } = await supabase.rpc('email_has_account', { p_email: recoveryEmail });
-            if (exists === false) {
-                setError('No existe ninguna cuenta con ese correo. Verifica que esté bien escrito o regístrate.');
-                setLoading(false);
-                return;
-            }
-            const { error: err } = await supabase.auth.resetPasswordForEmail(recoveryEmail, {
-                redirectTo: SITE_URL,
-            });
-            if (err) throw err;
-            toast('✉️ Revisa tu correo para restablecer la clave');
-            setShowRecovery(false);
-        } catch (e: any) {
-            const msg = e.message || '';
-            if (msg.toLowerCase().includes('rate limit')) setError('Se alcanzó el límite de correos por hora del servidor. Espera unos 60 minutos e inténtalo de nuevo.');
-            else setError(msg || 'Error al enviar correo');
-        }
-        setLoading(false);
-    };
+    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -353,110 +309,25 @@ function LoginPage() {
         setError('');
         manualAuthInProgress = true;
         try {
-            if (isRegister) {
-                // Aviso claro si el correo ya tiene cuenta (Supabase lo oculta
-                // por defecto devolviendo un usuario "fantasma" sin identities).
-                const { data: exists } = await supabase.rpc('email_has_account', { p_email: email });
-                if (exists === true) {
-                    setError('Ya existe una cuenta con ese correo. Inicia sesión o usa "¿Olvidaste tu clave?".');
-                    setLoading(false);
-                    return;
-                }
-                // Nombre y cargo viajan como metadata: si Supabase exige confirmar
-                // el correo, el perfil se crea después (listener de auth) con ellos.
-                const { data, error: signUpErr } = await supabase.auth.signUp({
-                    email, password,
-                    options: { emailRedirectTo: SITE_URL, data: { name: name.trim(), cargo: cargo.trim() } },
-                });
-                if (signUpErr) throw signUpErr;
-                if (data?.user && data.user.identities?.length === 0) {
-                    setError('Ya existe una cuenta con ese correo. Inicia sesión o usa "¿Olvidaste tu clave?".');
-                    setLoading(false);
-                    return;
-                }
-                if (data?.user && !data.user.email_confirmed_at) {
-                    setEmailSent(true);
-                    setLoading(false);
-                    return;
-                }
-                if (data?.user) {
-                    const profile = await api.createUserProfile({
-                        auth_id: data.user.id, email, name: name || email.split('@')[0], cargo: cargo.trim() || undefined, role: 'USER', points: 0, status: 'ACTIVO'
-                    });
-                    setUser(profile);
-                    go('home');
-                }
-            } else {
-                const { data, error: authErr } = await supabase.auth.signInWithPassword({ email, password });
-                if (authErr) throw authErr;
-                if (data?.user) {
-                    let profile = await api.getUserByAuthId(data.user.id);
-                    if (!profile) profile = await api.getUserByEmail(email);
-                    if (!profile) {
-                        profile = await api.createUserProfile({
-                            auth_id: data.user.id, email,
-                            name: data.user.user_metadata?.name || email.split('@')[0],
-                            cargo: data.user.user_metadata?.cargo || undefined,
-                            role: 'USER', points: 0, status: 'ACTIVO'
-                        });
-                    }
-                    setUser(profile);
-                    go('home');
-                }
+            const { user: authUser } = await api.signIn(usuario, password);
+            const profile = authUser ? await api.getUserByAuthId(authUser.id) : null;
+            if (!profile) {
+                await supabase.auth.signOut();
+                throw new Error('Tu cuenta no tiene perfil en Salas ADR. Contacta al administrador.');
             }
+            if (profile.status !== 'ACTIVO') {
+                await supabase.auth.signOut();
+                throw new Error('Este usuario está desactivado. Contacta al administrador.');
+            }
+            setUser(profile);
+            go(profile.must_change_password ? 'change-password' : 'home');
         } catch (err: any) {
-            const msg = err.message || '';
-            if (msg.includes('Email not confirmed')) setError('Revisa tu correo y confirma tu cuenta antes de iniciar sesión');
-            else if (msg.includes('Invalid login')) setError('Correo o contraseña incorrectos');
-            else if (msg.toLowerCase().includes('rate limit')) setError('Se alcanzó el límite de correos por hora del servidor. Espera unos 60 minutos e inténtalo de nuevo.');
-            else setError(msg || 'Error de autenticación');
+            setError(api.friendlyError(err));
         } finally {
             manualAuthInProgress = false;
         }
         setLoading(false);
     };
-
-    if (emailSent) return (
-        <div className="login-container" ref={cardRef}>
-            <div className="login-bg-orb login-bg-orb-1" />
-            <div className="login-bg-orb login-bg-orb-2" />
-            <div className="login-card" style={{ textAlign: 'center' }}>
-                <span className="material-symbols-outlined" style={{ fontSize: 64, color: 'var(--accent)' }}>mark_email_read</span>
-                <h2 style={{ margin: '16px 0 8px' }}>¡Revisa tu correo!</h2>
-                <p style={{ color: 'var(--text-2)', fontSize: 14, lineHeight: 1.6 }}>
-                    Enviamos un enlace de confirmación a <strong>{email}</strong>.<br />
-                    Haz clic en el enlace y luego vuelve a iniciar sesión.
-                </p>
-                <button className="btn btn-primary btn-full" style={{ marginTop: 20 }} onClick={() => { setEmailSent(false); setIsRegister(false); }}>
-                    Ya confirmé, iniciar sesión
-                </button>
-            </div>
-        </div>
-    );
-
-    if (showRecovery) return (
-        <div className="login-container" ref={cardRef}>
-            <div className="login-bg-orb login-bg-orb-1" />
-            <div className="login-bg-orb login-bg-orb-2" />
-            <div className="login-card">
-                <div className="login-logo">
-                    <AdrMark size={96} />
-                    <h1>Recuperar clave</h1>
-                    <p>Te enviaremos un enlace a tu correo</p>
-                </div>
-                {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>{error}</div>}
-                <form className="login-form" onSubmit={handleRecovery}>
-                    <div><label>Correo electrónico</label><input className="input" type="email" placeholder="tu.correo@empresa.com" value={recoveryEmail} onChange={e => setRecoveryEmail(e.target.value)} required /></div>
-                    <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
-                        {loading ? 'Enviando…' : 'Enviar enlace'}
-                    </button>
-                </form>
-                <button className="btn btn-ghost btn-full" style={{ marginTop: 8 }} onClick={() => { setShowRecovery(false); setError(''); }}>
-                    ← Volver a iniciar sesión
-                </button>
-            </div>
-        </div>
-    );
 
     return (
         <div className="login-container" ref={cardRef}>
@@ -466,74 +337,91 @@ function LoginPage() {
                 <div className="login-logo">
                     <AdrMark size={96} />
                     <h1>Salas ADR</h1>
-                    <p>Reserva de salas de reunión · Agrícola Don Ricardo</p>
+                    <p>Salas de reunión de Agrícola Don Ricardo</p>
                 </div>
-                {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>{error}</div>}
+                {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px', whiteSpace: 'normal', textAlign: 'center' }}>{error}</div>}
                 <form className="login-form" onSubmit={handleSubmit}>
-                    {isRegister && (
-                        <div><label>Nombres y apellidos</label><input className="input" placeholder="Tu nombre completo" value={name} onChange={e => setName(e.target.value)} required /></div>
-                    )}
-                    {isRegister && (
-                        <div>
-                            <label>Cargo</label>
-                            <input className="input" list="adr-cargos" placeholder="Ej: Supervisor de Calidad" value={cargo} onChange={e => setCargo(e.target.value)} maxLength={80} required />
-                            <datalist id="adr-cargos">{ADR_CARGOS_SUGERIDOS.map(c => <option key={c} value={c} />)}</datalist>
-                        </div>
-                    )}
-                    <div><label>Correo electrónico</label><input className="input" type="email" placeholder="tu.correo@empresa.com" value={email} onChange={e => setEmail(e.target.value)} required /></div>
+                    <div>
+                        <label>Usuario</label>
+                        <input className="input" placeholder="ej. juan.perez" autoComplete="username" autoCapitalize="none" spellCheck={false}
+                            value={usuario} onChange={e => setUsuario(e.target.value)} required />
+                    </div>
                     <div>
                         <label>Contraseña</label>
-                        <input className="input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required />
-                        {!isRegister && (
-                            <div style={{ textAlign: 'right', marginTop: 6 }}>
-                                <button type="button" onClick={() => { setShowRecovery(true); setRecoveryEmail(email); setError(''); }}
-                                    style={{ background: 'none', border: 'none', color: 'var(--primary-light)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
-                                    ¿Olvidaste tu clave?
-                                </button>
-                            </div>
-                        )}
+                        <input className="input" type="password" placeholder="••••••••" autoComplete="current-password"
+                            value={password} onChange={e => setPassword(e.target.value)} required />
+                        <div style={{ textAlign: 'right', marginTop: 6 }}>
+                            <button type="button" onClick={() => setShowHelp(h => !h)}
+                                style={{ background: 'none', border: 'none', color: 'var(--primary-light)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
+                                ¿Olvidaste tu clave o no tienes cuenta?
+                            </button>
+                        </div>
                     </div>
+                    {showHelp && (
+                        <div className="card" style={{ padding: 12, fontSize: 13, lineHeight: 1.5, color: 'var(--text-2)' }}>
+                            Las cuentas las crea el <strong>administrador de salas</strong>. Pídele tu usuario o que
+                            restablezca tu clave: te dará una temporal y al entrar crearás la tuya.
+                        </div>
+                    )}
                     <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
-                        {loading ? 'Cargando...' : isRegister ? 'Crear cuenta' : 'Iniciar sesión'}
+                        {loading ? 'Ingresando…' : 'Ingresar'}
                     </button>
                 </form>
-                <button className="btn btn-ghost btn-full" style={{ marginTop: 8 }} onClick={() => { setIsRegister(!isRegister); setError(''); }}>
-                    {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
-                </button>
             </div>
         </div>
     );
 }
 
-// ─── ResetPasswordPage ───
-// Pantalla a la que llega el usuario desde el enlace "recuperar clave" del
-// correo (evento PASSWORD_RECOVERY de Supabase).
-function ResetPasswordPage({ recoveryMode }: { recoveryMode: React.MutableRefObject<boolean> }) {
-    const { user, go, toast } = useApp();
+// ─── ChangePasswordPage ───
+// forced: primer ingreso o clave restablecida por el admin (no puede saltarlo).
+// Sin forced: el colaborador cambia su clave desde Perfil.
+function ChangePasswordPage({ forced }: { forced?: boolean }) {
+    const { user, setUser, go, toast } = useApp();
     const [password, setPassword] = useState('');
     const [confirm, setConfirm] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    const handleReset = async (e: React.FormEvent) => {
+    const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!user) return;
         if (password.length < 6) { setError('La clave debe tener al menos 6 caracteres'); return; }
         if (password !== confirm) { setError('Las claves no coinciden'); return; }
         setLoading(true);
         setError('');
         try {
-            const { error: err } = await supabase.auth.updateUser({ password });
-            if (err) throw err;
-            recoveryMode.current = false;
-            // Limpia los tokens del enlace de recuperación de la URL
-            window.history.replaceState(null, '', window.location.pathname);
-            toast('🔒 Clave actualizada correctamente');
-            go(user ? 'home' : 'login');
+            const updated = await api.changeOwnPassword(user.id, password);
+            setUser({ ...user, ...updated });
+            toast('Contraseña actualizada');
+            go('home');
         } catch (e: any) {
-            setError(e.message || 'No se pudo actualizar la clave');
+            setError(api.friendlyError(e));
         }
         setLoading(false);
     };
+
+    const form = (
+        <>
+            {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>{error}</div>}
+            <form className="login-form" onSubmit={handleSave}>
+                <div><label>Nueva contraseña</label><input className="input" type="password" autoComplete="new-password" placeholder="Mínimo 6 caracteres" value={password} onChange={e => setPassword(e.target.value)} required /></div>
+                <div><label>Repite la contraseña</label><input className="input" type="password" autoComplete="new-password" placeholder="••••••••" value={confirm} onChange={e => setConfirm(e.target.value)} required /></div>
+                <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
+                    {loading ? 'Guardando…' : forced ? 'Guardar y continuar' : 'Guardar nueva clave'}
+                </button>
+            </form>
+        </>
+    );
+
+    if (!forced) return (
+        <div className="fade-in">
+            <button className="btn btn-ghost btn-sm" onClick={() => go('profile')} style={{ marginBottom: 12 }}>
+                <span className="material-symbols-outlined">arrow_back</span> Perfil
+            </button>
+            <h2 className="section-title">Cambiar contraseña</h2>
+            <div className="card" style={{ padding: 16 }}>{form}</div>
+        </div>
+    );
 
     return (
         <div className="login-container">
@@ -542,17 +430,13 @@ function ResetPasswordPage({ recoveryMode }: { recoveryMode: React.MutableRefObj
             <div className="login-card">
                 <div className="login-logo">
                     <AdrMark size={96} />
-                    <h1>Nueva clave</h1>
-                    <p>Escribe tu nueva contraseña</p>
+                    <h1>¡Bienvenido{user?.name ? `, ${user.name.split(' ')[0]}` : ''}!</h1>
+                    <p>Por seguridad, crea tu propia contraseña antes de continuar</p>
                 </div>
-                {error && <div className="badge badge-danger" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>{error}</div>}
-                <form className="login-form" onSubmit={handleReset}>
-                    <div><label>Nueva contraseña</label><input className="input" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required /></div>
-                    <div><label>Confirmar contraseña</label><input className="input" type="password" placeholder="••••••••" value={confirm} onChange={e => setConfirm(e.target.value)} required /></div>
-                    <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
-                        {loading ? 'Guardando…' : 'Guardar nueva clave'}
-                    </button>
-                </form>
+                {form}
+                <button className="btn btn-ghost btn-full" style={{ marginTop: 8 }} onClick={() => supabase.auth.signOut()}>
+                    Salir
+                </button>
             </div>
         </div>
     );
@@ -563,24 +447,37 @@ function HomePage() {
     const { user, go } = useApp();
     const [reservations, setReservations] = useState<Reservation[]>([]);
     const [amenities, setAmenities] = useState<Amenity[]>([]);
+    const [todayBusy, setTodayBusy] = useState<Reservation[]>([]);
     const level = getUserLevel(user?.points || 0);
     const hasCommunity = !!user?.community_id;
+    const today = peruTodayISO();
+    const nowHour = peruNow().getHours();
 
     useEffect(() => {
         if (user && hasCommunity) {
-            api.getUserReservations(user.id).then(r => setReservations(r.filter(x => x.status === 'ACTIVA').slice(0, 3)));
+            api.getUserReservations(user.id).then(r => setReservations(
+                r.filter(x => x.status === 'ACTIVA' && x.date >= today)
+                    .sort((a, b) => (a.date + a.time_slot).localeCompare(b.date + b.time_slot))
+                    .slice(0, 3)));
             api.getAmenities(user.community_id).then(setAmenities);
+            api.getReservationsByDate(today).then(setTodayBusy).catch(() => setTodayBusy([]));
         }
     }, [user]);
+
+    // Sala libre "ahora mismo" = sin reserva en el bloque horario actual
+    const currentSlot = TIME_SLOTS.find(s => parseInt(s, 10) === nowHour);
+    const freeNow = currentSlot
+        ? amenities.filter(a => !todayBusy.some(r => r.amenity_id === a.id && r.time_slot === currentSlot)).length
+        : null;
 
     return (
         <div className="fade-in">
             <div style={{ marginBottom: 24 }}>
-                <p style={{ color: 'var(--text-2)', fontSize: 14 }}>Bienvenido,</p>
+                <p style={{ color: 'var(--text-2)', fontSize: 14 }}>Hola,</p>
                 <h2 style={{ fontSize: 26, fontWeight: 800 }}>{user?.name || 'Colaborador'}</h2>
                 {(user?.cargo || user?.apartment) && (
                     <p style={{ color: 'var(--text-3)', fontSize: 13, marginTop: 2 }}>
-                        {[user?.cargo, user?.apartment, user?.community?.name].filter(Boolean).join(' · ')}
+                        {[user?.cargo, user?.apartment].filter(Boolean).join(' · ')}
                     </p>
                 )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
@@ -591,50 +488,57 @@ function HomePage() {
 
             {!hasCommunity ? (
                 <div className="card" style={{ textAlign: 'center', padding: 32 }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--primary-light)' }}>domain</span>
-                    <h3 style={{ margin: '12px 0 8px' }}>Afíliate a tu sede</h3>
-                    <p style={{ color: 'var(--text-2)', fontSize: 14, marginBottom: 16 }}>
-                        Para reservar salas de reunión primero debes afiliarte a tu sede ADR indicando tu área y cargo. El administrador aprobará tu solicitud.
+                    <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--warning)' }}>hourglass_top</span>
+                    <h3 style={{ margin: '12px 0 8px' }}>Cuenta en configuración</h3>
+                    <p style={{ color: 'var(--text-2)', fontSize: 14 }}>
+                        Tu cuenta aún no está vinculada a ADR. Pide al administrador de salas que la habilite.
                     </p>
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-                        <button className="btn btn-primary" onClick={() => go('join-community')}>Afiliarme a una sede</button>
-                        {/* Registrar sede: solo admins (que aún no administran una) y el super admin.
-                            Estamos en la rama !hasCommunity, así que un ADMIN aquí no tiene sede todavía. */}
-                        {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
-                            <button className="btn btn-ghost" onClick={() => go('join-community', { createMode: true })}>Registrar sede nueva</button>
-                        )}
-                    </div>
                 </div>
             ) : (
                 <>
-                    {/* Quick actions */}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
-                        <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('amenities')}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--primary-light)' }}>add_circle</span>
-                            <h4 style={{ fontSize: 14, marginTop: 8 }}>Reservar</h4>
-                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Salas</p>
+                    {/* Estado de las salas ahora */}
+                    {freeNow !== null && amenities.length > 0 && (
+                        <div className="card stagger-item" style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, cursor: 'pointer' }} onClick={() => go('availability')}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 30, color: freeNow > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                                {freeNow > 0 ? 'event_available' : 'event_busy'}
+                            </span>
+                            <div style={{ flex: 1 }}>
+                                <h4 style={{ fontSize: 14 }}>{freeNow} de {amenities.length} salas libres ahora</h4>
+                                <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Bloque {currentSlot} · ver agenda del día</p>
+                            </div>
+                            <span className="material-symbols-outlined" style={{ color: 'var(--text-3)' }}>chevron_right</span>
                         </div>
-                        <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('qr-access')}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--accent)' }}>qr_code_2</span>
-                            <h4 style={{ fontSize: 14, marginTop: 8 }}>Mi QR</h4>
-                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Acceso</p>
-                        </div>
-                        <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center' }} onClick={() => go('leaderboard')}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--adr-naranja)' }}>leaderboard</span>
-                            <h4 style={{ fontSize: 14, marginTop: 8 }}>Ranking</h4>
-                            <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Top colaboradores</p>
-                        </div>
-                        {user?.role === 'ADMIN' && (
-                            <div className="card stagger-item" style={{ cursor: 'pointer', textAlign: 'center', border: '1px solid var(--primary-light)', gridColumn: '1 / -1' }} onClick={() => go('admin')}>
-                                <span className="material-symbols-outlined" style={{ fontSize: 32, color: 'var(--adr-naranja)' }}>admin_panel_settings</span>
-                                <h4 style={{ fontSize: 14, marginTop: 8 }}>Panel Admin</h4>
-                                <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Salas, solicitudes, sanciones y más</p>
+                    )}
+
+                    {/* Accesos rápidos */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 24 }}>
+                        {[
+                            { icon: 'add_circle', color: 'var(--primary-light)', title: 'Reservar sala', sub: 'Elige sala y horario', v: 'amenities' as AppView },
+                            { icon: 'view_timeline', color: 'var(--accent)', title: 'Agenda', sub: 'Ocupación por día', v: 'availability' as AppView },
+                            { icon: 'forum', color: 'var(--adr-naranja)', title: 'Muro', sub: 'Avisos internos', v: 'community' as AppView },
+                            { icon: 'leaderboard', color: 'var(--primary-light)', title: 'Ranking', sub: 'Buen uso de salas', v: 'leaderboard' as AppView },
+                        ].map(q => (
+                            <div key={q.v} className="card stagger-item" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }} onClick={() => go(q.v)}>
+                                <span className="material-symbols-outlined" style={{ fontSize: 28, color: q.color }}>{q.icon}</span>
+                                <div>
+                                    <h4 style={{ fontSize: 14 }}>{q.title}</h4>
+                                    <p style={{ fontSize: 11, color: 'var(--text-3)' }}>{q.sub}</p>
+                                </div>
+                            </div>
+                        ))}
+                        {isAdminRole(user) && (
+                            <div className="card stagger-item" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--primary-light)', gridColumn: '1 / -1' }} onClick={() => go('admin')}>
+                                <span className="material-symbols-outlined" style={{ fontSize: 28, color: 'var(--adr-naranja)' }}>admin_panel_settings</span>
+                                <div>
+                                    <h4 style={{ fontSize: 14 }}>Panel de administración</h4>
+                                    <p style={{ fontSize: 12, color: 'var(--text-3)' }}>Crear salas, auditoría, reglas y colaboradores</p>
+                                </div>
                             </div>
                         )}
                     </div>
 
-                    {/* Active reservations */}
-                    <div className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>event</span> Próximas reuniones</div>
+                    {/* Próximas reuniones */}
+                    <div className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>event</span> Mis próximas reuniones</div>
                     {reservations.length === 0 ? (
                         <div className="card" style={{ textAlign: 'center', padding: 24, color: 'var(--text-3)' }}>
                             <p>No tienes reuniones programadas</p>
@@ -642,30 +546,17 @@ function HomePage() {
                         </div>
                     ) : reservations.map(r => (
                         <div key={r.id} className="card" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }} onClick={() => go('my-reservations')}>
-                            <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--primary-glow)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>calendar_today</span>
+                            <div style={{ width: 52, height: 52, borderRadius: 12, background: 'var(--primary-glow)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--primary-light)' }}>{r.time_slot.slice(0, 5)}</span>
+                                <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{r.date === today ? 'Hoy' : r.date.slice(5).split('-').reverse().join('/')}</span>
                             </div>
                             <div style={{ flex: 1 }}>
                                 <h4 style={{ fontSize: 14, fontWeight: 600 }}>{r.amenity?.name || 'Sala'}</h4>
-                                <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{r.date} • {r.time_slot}</p>
-                                {r.motivo && <p style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>📝 {r.motivo}</p>}
+                                {r.motivo && <p style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2 }}>{r.motivo}</p>}
+                                {r.amenity?.location && <p style={{ fontSize: 11, color: 'var(--text-3)' }}>📍 {r.amenity.location}</p>}
                             </div>
-                            <span className="badge badge-accent">Activa</span>
                         </div>
                     ))}
-
-                    {/* Spaces preview */}
-                    <div className="section-title" style={{ marginTop: 24 }}><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>location_on</span> Salas disponibles</div>
-                    <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 8 }}>
-                        {amenities.slice(0, 4).map(a => (
-                            <div key={a.id} style={{ minWidth: 160, cursor: 'pointer' }} onClick={() => go('amenity-detail', a)}>
-                                <img src={a.image_url || 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=400'} alt={a.name}
-                                    style={{ width: 160, height: 100, objectFit: 'cover', borderRadius: 12 }} />
-                                <h4 style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>{a.name}</h4>
-                                <p style={{ fontSize: 11, color: 'var(--text-3)' }}>Cap: {a.capacity}</p>
-                            </div>
-                        ))}
-                    </div>
                 </>
             )}
         </div>
@@ -677,25 +568,57 @@ function AmenitiesPage() {
     const { user, go } = useApp();
     const [amenities, setAmenities] = useState<Amenity[]>([]);
     const [loading, setLoading] = useState(true);
+    const [minCap, setMinCap] = useState(0);
+    const [needs, setNeeds] = useState<string[]>([]);
 
     useEffect(() => {
         api.getAmenities(user?.community_id).then(a => { setAmenities(a); setLoading(false); });
     }, [user]);
 
+    const toggleNeed = (k: string) => setNeeds(n => n.includes(k) ? n.filter(x => x !== k) : [...n, k]);
+    const filtered = amenities.filter(a =>
+        (a.capacity || 0) >= minCap && needs.every(k => (a.equipment || []).includes(k)));
+
     return (
         <div className="fade-in">
             <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>meeting_room</span> Salas de reunión</h2>
+
+            {/* Filtros: asistentes y equipamiento */}
+            <div className="card" style={{ marginBottom: 16, padding: 12 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                    {[0, 4, 8, 15, 30].map(c => (
+                        <button key={c} className={`btn btn-sm ${minCap === c ? 'btn-primary' : 'btn-ghost'}`} style={{ fontSize: 12, padding: '6px 10px' }}
+                            onClick={() => setMinCap(c)}>{c === 0 ? 'Todas' : `${c}+ pers.`}</button>
+                    ))}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {ROOM_EQUIPMENT.slice(0, 4).map(e => (
+                        <button key={e.key} className={`btn btn-sm ${needs.includes(e.key) ? 'btn-accent' : 'btn-ghost'}`} style={{ fontSize: 12, padding: '6px 10px' }}
+                            onClick={() => toggleNeed(e.key)}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{e.icon}</span>{e.label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
             {loading ? Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 240, marginBottom: 16 }} />) :
-                amenities.map(a => (
+                filtered.length === 0 ? (
+                    <div className="empty-state">
+                        <span className="material-symbols-outlined">search_off</span>
+                        <p>{amenities.length === 0 ? 'Aún no hay salas. El administrador debe crearlas.' : 'Ninguna sala cumple esos filtros'}</p>
+                    </div>
+                ) : filtered.map(a => (
                     <div key={a.id} className="amenity-card stagger-item" onClick={() => go('amenity-detail', a)}>
-                        <img className="amenity-card-img" src={a.image_url || 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=800'} alt={a.name} />
+                        <img className="amenity-card-img" src={a.image_url || DEFAULT_ROOM_IMG} alt={a.name} />
                         <div className="amenity-card-body">
                             <h3>{a.name}</h3>
+                            {a.location && <p style={{ marginBottom: 2 }}>📍 {a.location}</p>}
                             <p>{a.description}</p>
                             <div className="amenity-card-meta">
                                 <span><span className="material-symbols-outlined" style={{ fontSize: 16 }}>group</span> {a.capacity} personas</span>
-                                <span><span className="material-symbols-outlined" style={{ fontSize: 16 }}>stars</span> +{a.points_reward} pts</span>
+                                <span><span className="material-symbols-outlined" style={{ fontSize: 16 }}>category</span> {roomTypeLabel(a.amenity_type)}</span>
                             </div>
+                            <div style={{ marginTop: 8 }}><EquipmentChips equipment={a.equipment} small /></div>
                         </div>
                     </div>
                 ))
@@ -704,25 +627,130 @@ function AmenitiesPage() {
     );
 }
 
+// ─── AvailabilityPage (agenda: salas × horarios del día) ───
+function AvailabilityPage() {
+    const { user, go } = useApp();
+    const today = peruTodayISO();
+    const [date, setDate] = useState(today);
+    const [amenities, setAmenities] = useState<Amenity[]>([]);
+    const [busy, setBusy] = useState<Reservation[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => { api.getAmenities(user?.community_id).then(setAmenities); }, [user]);
+    useEffect(() => {
+        setLoading(true);
+        api.getReservationsByDate(date).then(setBusy).catch(() => setBusy([])).finally(() => setLoading(false));
+    }, [date]);
+
+    const nowHour = peruNow().getHours();
+    // Se reserva de hoy al domingo de la semana siguiente; el admin puede mirar más allá.
+    const maxDate = isAdminRole(user) ? addDaysISO(today, 60) : bookingMaxDateISO();
+    const windowDays: string[] = [];
+    for (let d = today; d <= bookingMaxDateISO(); d = addDaysISO(d, 1)) windowDays.push(d);
+    const isPast = (s: string) => date < today || (date === today && nowHour >= parseInt(s, 10));
+    const shiftDay = (n: number) => {
+        const iso = addDaysISO(date, n);
+        if (iso >= today && iso <= maxDate) setDate(iso);
+    };
+
+    return (
+        <div className="fade-in">
+            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>view_timeline</span> Agenda de salas</h2>
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 6, marginBottom: 8 }}>
+                {windowDays.map(d => (
+                    <button key={d} className={`btn btn-sm ${d === date ? 'btn-primary' : 'btn-ghost'}`}
+                        style={{ fontSize: 12, padding: '6px 10px', whiteSpace: 'nowrap', flexShrink: 0 }} onClick={() => setDate(d)}>
+                        {d === today ? 'Hoy' : shortDayLabel(d)}
+                    </button>
+                ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+                <button className="icon-btn" onClick={() => shiftDay(-1)} disabled={date <= today}><span className="material-symbols-outlined">chevron_left</span></button>
+                <input className="input" type="date" value={date} min={today} max={maxDate} onChange={e => e.target.value && setDate(e.target.value)} style={{ flex: 1 }} />
+                <button className="icon-btn" onClick={() => shiftDay(1)} disabled={date >= maxDate}><span className="material-symbols-outlined">chevron_right</span></button>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
+                Toca un bloque <strong style={{ color: 'var(--success)' }}>libre</strong> para reservarlo. Puedes reservar desde hoy
+                hasta el {shortDayLabel(bookingMaxDateISO())}, máximo {MAX_SLOTS_PER_DAY} h por día.
+            </p>
+            {amenities.length === 0 ? (
+                <div className="empty-state"><span className="material-symbols-outlined">meeting_room</span><p>Aún no hay salas creadas</p></div>
+            ) : (
+                <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 12, opacity: loading ? 0.5 : 1 }}>
+                    <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%', minWidth: 120 + amenities.length * 120 }}>
+                        <thead>
+                            <tr style={{ background: 'var(--bg-2)' }}>
+                                <th style={{ padding: 8, textAlign: 'left', position: 'sticky', left: 0, background: 'var(--bg-2)', width: 90 }}>Hora</th>
+                                {amenities.map(a => (
+                                    <th key={a.id} style={{ padding: 8, textAlign: 'left', fontWeight: 700 }}>
+                                        {a.name}<div style={{ fontWeight: 400, fontSize: 10, color: 'var(--text-3)' }}>👥 {a.capacity}</div>
+                                    </th>
+                                ))}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {TIME_SLOTS.map(s => (
+                                <tr key={s} style={{ borderTop: '1px solid var(--border-2)' }}>
+                                    <td style={{ padding: 8, whiteSpace: 'nowrap', color: 'var(--text-2)', position: 'sticky', left: 0, background: 'var(--surface)' }}>{s}</td>
+                                    {amenities.map(a => {
+                                        const r = busy.find(x => x.amenity_id === a.id && x.time_slot === s);
+                                        const past = isPast(s);
+                                        const mine = r && r.user_id === user?.id;
+                                        return (
+                                            <td key={a.id} style={{ padding: 4 }}>
+                                                {r ? (
+                                                    <div title={r.motivo || ''} style={{ padding: '6px 8px', borderRadius: 8, background: mine ? 'var(--primary-glow)' : 'rgba(229,72,77,0.12)', color: mine ? 'var(--primary-light)' : 'var(--danger)', fontSize: 11, lineHeight: 1.3 }}>
+                                                        {mine ? 'Tu reunión' : ((r as any).user?.name || 'Ocupada')}
+                                                        {(r as any).user?.apartment && !mine && <div style={{ color: 'var(--text-3)', fontSize: 10 }}>{(r as any).user.apartment}</div>}
+                                                    </div>
+                                                ) : past ? (
+                                                    <div style={{ padding: '6px 8px', color: 'var(--text-3)', fontSize: 11 }}>—</div>
+                                                ) : (
+                                                    <button onClick={() => go('booking', { ...a, preset: { date, slot: s } })}
+                                                        style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px dashed var(--success)', background: 'transparent', color: 'var(--success)', cursor: 'pointer', fontSize: 11 }}>
+                                                        Libre
+                                                    </button>
+                                                )}
+                                            </td>
+                                        );
+                                    })}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── AmenityDetailPage ───
 function AmenityDetailPage() {
     const { viewData: amenity, go } = useApp();
+    const [shown, setShown] = useState<string | null>(null);
     if (!amenity) return <div className="empty-state"><p>Selecciona una sala</p></div>;
+    const photos: string[] = [amenity.image_url || DEFAULT_ROOM_IMG, ...(amenity.gallery || [])];
+    const main = shown && photos.includes(shown) ? shown : photos[0];
     return (
         <div className="fade-in">
             <button className="btn btn-ghost btn-sm" onClick={() => go('amenities')} style={{ marginBottom: 12 }}>
                 <span className="material-symbols-outlined">arrow_back</span> Volver
             </button>
-            <img src={amenity.image_url || 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=800'} alt={amenity.name} style={{ width: '100%', height: 220, objectFit: 'cover', borderRadius: 16, marginBottom: 16 }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span className="badge badge-accent">Disponible</span>
-            </div>
-            <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 8 }}>{amenity.name}</h2>
-            <p style={{ color: 'var(--text-2)', fontSize: 14, lineHeight: 1.6, marginBottom: 20 }}>{amenity.description}</p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 20 }}>
-                {[{ icon: 'group', label: 'Capacidad', value: `${amenity.capacity} Pax` },
-                { icon: 'stars', label: 'Puntos', value: `+${amenity.points_reward}` },
-                { icon: 'category', label: 'Tipo', value: amenity.amenity_type }
+            <img src={main} alt={amenity.name} style={{ width: '100%', height: 220, objectFit: 'cover', borderRadius: 16, marginBottom: photos.length > 1 ? 8 : 16 }} />
+            {photos.length > 1 && (
+                <div style={{ display: 'flex', gap: 6, overflowX: 'auto', marginBottom: 16 }}>
+                    {photos.map(url => (
+                        <img key={url} src={url} alt="" onClick={() => setShown(url)}
+                            style={{ width: 64, height: 48, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', flexShrink: 0, outline: url === main ? '2px solid var(--primary-light)' : 'none' }} />
+                    ))}
+                </div>
+            )}
+            <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 4 }}>{amenity.name}</h2>
+            {amenity.location && <p style={{ color: 'var(--text-3)', fontSize: 13, marginBottom: 8 }}>📍 {amenity.location}</p>}
+            <p style={{ color: 'var(--text-2)', fontSize: 14, lineHeight: 1.6, marginBottom: 16 }}>{amenity.description}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+                {[{ icon: 'group', label: 'Capacidad', value: `${amenity.capacity} personas` },
+                { icon: 'category', label: 'Tipo', value: roomTypeLabel(amenity.amenity_type) },
                 ].map(s => (
                     <div key={s.label} className="card" style={{ textAlign: 'center', padding: 12 }}>
                         <span className="material-symbols-outlined" style={{ color: 'var(--primary-light)', fontSize: 24 }}>{s.icon}</span>
@@ -731,76 +759,100 @@ function AmenityDetailPage() {
                     </div>
                 ))}
             </div>
+            {amenity.equipment?.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', marginBottom: 8 }}>Equipamiento</p>
+                    <EquipmentChips equipment={amenity.equipment} />
+                </div>
+            )}
             <button className="btn btn-primary btn-full" onClick={() => go('booking', amenity)}>
-                <span className="material-symbols-outlined">event_available</span> Reservar Ahora
+                <span className="material-symbols-outlined">event_available</span> Reservar esta sala
             </button>
         </div>
     );
 }
 
 // ─── BookingPage ───
+// Ventana: hoy → domingo de la semana siguiente. Se pueden marcar varios bloques
+// seguidos o sueltos, hasta MAX_SLOTS_PER_DAY por día sumando todas las salas,
+// para que nadie acapare un día entero (el trigger reservations_check_rules lo
+// vuelve a validar en la base). Los administradores quedan exentos.
 function BookingPage() {
     const { viewData: amenity, user, go, toast } = useApp();
 
-    // Helper: current date/time in Peru (UTC-5, no DST)
-    const getPeruNow = () => {
-        const now = new Date();
-        const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-        return new Date(utc + (-5 * 60) * 60000);
-    };
+    const now = peruNow();
+    const todayPeru = peruTodayISO();
+    const isAdmin = isAdminRole(user);
 
-    const peruNow = getPeruNow();
-    const todayPeru = peruNow.toISOString().split('T')[0];
-
-    const [date, setDate] = useState(todayPeru);
-    const [slot, setSlot] = useState('');
+    const [date, setDate] = useState<string>(amenity?.preset?.date || todayPeru);
+    const [slots, setSlots] = useState<string[]>(amenity?.preset?.slot ? [amenity.preset.slot] : []);
     const [motivo, setMotivo] = useState('');
     const [attendees, setAttendees] = useState('');
-    const [booked, setBooked] = useState<string[]>([]);
+    const [booked, setBooked] = useState<Reservation[]>([]);
+    const [usedToday, setUsedToday] = useState(0); // bloques que ya tiene ese día
     const [loading, setLoading] = useState(false);
     const [eligibility, setEligibility] = useState<api.Eligibility | null>(null);
-    const allSlots = ['07:00-08:00', '08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00', '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '18:00-19:00', '19:00-20:00'];
+    const firstLoad = useRef(true);
 
-    // Slots whose start hour is already past (only relevant if date = today)
-    const isPastSlot = (s: string) => {
-        if (date !== todayPeru) return false;
-        const startHour = parseInt(s.split(':')[0], 10);
-        return peruNow.getHours() >= startHour;
-    };
+    // Bloques cuya hora de inicio ya pasó (solo si la fecha es hoy)
+    const isPastSlot = (s: string) => date === todayPeru && now.getHours() >= parseInt(s, 10);
 
-    // Motor de elegibilidad: sanciones + restricciones (Hoja1 #10, #11)
+    // Motor de elegibilidad: ventana, sanciones y restricciones
     useEffect(() => {
-        if (amenity && user) {
-            api.getEligibility(user, amenity.id).then(setEligibility);
-        }
+        if (amenity && user) api.getEligibility(user, amenity.id).then(setEligibility);
     }, [amenity, user]);
 
     useEffect(() => {
-        if (amenity) api.getAmenityReservations(amenity.id, date).then(r => setBooked(r.map(x => x.time_slot)));
-        setSlot('');
+        if (!amenity || !user) return;
+        api.getAmenityReservations(amenity.id, date).then(setBooked).catch(() => setBooked([]));
+        api.countUserSlotsOnDate(user.id, date).then(setUsedToday);
+        // Conserva el bloque preseleccionado desde la agenda solo en la primera carga
+        if (firstLoad.current) firstLoad.current = false; else setSlots([]);
     }, [amenity, date]);
 
+    const maxDate = eligibility?.maxDate || bookingMaxDateISO();
+    const days: string[] = [];
+    for (let d = todayPeru; d <= maxDate && days.length < 62; d = addDaysISO(d, 1)) days.push(d);
+
     const dateBlocked = eligibility?.blockedDates.includes(date) || false;
+    const remaining = isAdmin ? TIME_SLOTS.length : Math.max(0, MAX_SLOTS_PER_DAY - usedToday);
 
     const attendeesNum = parseInt(attendees, 10);
     const overCapacity = !!amenity && attendeesNum > (amenity.capacity || 0);
 
+    const toggleSlot = (s: string) => {
+        if (slots.includes(s)) { setSlots(slots.filter(x => x !== s)); return; }
+        if (slots.length >= remaining) {
+            toast(remaining === 0
+                ? `Ya tienes ${MAX_SLOTS_PER_DAY} h reservadas ese día`
+                : `Máximo ${MAX_SLOTS_PER_DAY} h por día (te quedan ${remaining})`);
+            return;
+        }
+        setSlots([...slots, s].sort());
+    };
+
     const handleBook = async () => {
-        if (!slot || !user || !amenity) return;
-        if (!motivo.trim()) { toast('📝 Indica el motivo de la reunión'); return; }
-        if (overCapacity) { toast(`⚠️ La sala admite máximo ${amenity.capacity} personas`); return; }
+        if (slots.length === 0 || !user || !amenity) return;
+        if (!motivo.trim()) { toast('Indica el motivo de la reunión'); return; }
+        if (overCapacity) { toast(`La sala admite máximo ${amenity.capacity} personas`); return; }
         setLoading(true);
+        const ok: string[] = [];
         try {
-            const created = await api.createReservation({
-                user_id: user.id, amenity_id: amenity.id, date, time_slot: slot,
-                motivo: motivo.trim(),
-                attendees: attendeesNum > 0 ? attendeesNum : undefined,
-            });
-            // Los puntos se otorgan cuando el admin marca la reserva como CUMPLIDA en
-            // Auditoría — antes los dábamos en este punto, lo que falseaba los rankings.
-            toast(`✅ Reserva ${created.code || 'confirmada'} · ${amenity.name}`);
+            for (const s of slots) {
+                await api.createReservation({
+                    user_id: user.id, amenity_id: amenity.id, date, time_slot: s,
+                    motivo: motivo.trim(),
+                    attendees: attendeesNum > 0 ? attendeesNum : undefined,
+                });
+                ok.push(s);
+            }
+            // Los puntos se otorgan cuando el admin marca la reserva como CUMPLIDA en Auditoría.
+            toast(`Reserva confirmada · ${amenity.name} · ${slots.length} h`);
             go('my-reservations');
-        } catch (e: any) { toast('❌ ' + (e.message || 'Error')); }
+        } catch (e: any) {
+            toast((ok.length ? `Se reservaron ${ok.length} bloque(s). ` : '') + api.friendlyError(e));
+            if (ok.length) go('my-reservations');
+        }
         setLoading(false);
     };
 
@@ -811,6 +863,13 @@ function BookingPage() {
                 <span className="material-symbols-outlined">arrow_back</span> Volver
             </button>
             <h2 className="section-title">Reservar {amenity.name}</h2>
+            {amenity.location && <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: -8, marginBottom: 12 }}>📍 {amenity.location} · 👥 hasta {amenity.capacity}</p>}
+
+            <div className="card stagger-item" style={{ marginBottom: 14, padding: 12, fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6 }}>
+                <strong>Reglas:</strong> reserva desde hoy hasta el <strong>{shortDayLabel(bookingMaxDateISO())}</strong> (semana actual y la siguiente),
+                máximo <strong>{MAX_SLOTS_PER_DAY} h por día</strong> sumando todas las salas.
+                {isAdmin && <span style={{ color: 'var(--accent)' }}> Como administrador no tienes estos límites.</span>}
+            </div>
 
             {eligibility && eligibility.reasons.length > 0 && (
                 <div className="card stagger-item" style={{
@@ -825,32 +884,43 @@ function BookingPage() {
             )}
 
             <label className="stagger-item" style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Fecha</label>
-            <input className="input stagger-item" type="date" value={date}
-                min={eligibility?.minDate || todayPeru}
-                max={eligibility?.maxDate || undefined}
-                onChange={e => setDate(e.target.value)} style={{ marginBottom: 8 }} />
+            <div className="stagger-item" style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 6, marginBottom: 8 }}>
+                {days.map(d => {
+                    const blocked = eligibility?.blockedDates.includes(d);
+                    return (
+                        <button key={d} className={`btn btn-sm ${d === date ? 'btn-primary' : 'btn-ghost'}`} disabled={blocked}
+                            style={{ fontSize: 12, padding: '6px 10px', whiteSpace: 'nowrap', flexShrink: 0, opacity: blocked ? 0.4 : 1 }}
+                            onClick={() => setDate(d)}>
+                            {d === todayPeru ? 'Hoy' : shortDayLabel(d)}
+                        </button>
+                    );
+                })}
+            </div>
             {dateBlocked && (
                 <div className="badge badge-danger stagger-item" style={{ width: '100%', justifyContent: 'center', marginBottom: 12, padding: '8px 12px' }}>
                     🚫 Esta fecha está bloqueada por sanción o cooldown
                 </div>
             )}
-            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>Horario</label>
+            <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', display: 'block', marginBottom: 6 }}>
+                Horario {!isAdmin && <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>· te quedan {Math.max(0, remaining - slots.length)} h este día</span>}
+            </label>
             {date === todayPeru && (
                 <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 8 }}>
-                    🕐 Hora actual en Perú: {peruNow.getHours().toString().padStart(2, '0')}:{peruNow.getMinutes().toString().padStart(2, '0')}
+                    🕐 Hora actual en Perú: {now.getHours().toString().padStart(2, '0')}:{now.getMinutes().toString().padStart(2, '0')}
                 </p>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
-                {allSlots.map(s => {
+                {TIME_SLOTS.map(s => {
                     const past = isPastSlot(s);
-                    const occupied = booked.includes(s);
-                    const disabled = occupied || past;
+                    const taken = booked.find(r => r.time_slot === s);
+                    const disabled = !!taken || past;
                     return (
                         <div key={s}
-                            className={`time-slot ${slot === s ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}
-                            onClick={() => !disabled && setSlot(s)}
-                            title={past ? 'Horario ya pasado' : occupied ? 'Ocupado' : ''}>
-                            {s} {occupied ? '🔒' : past ? '⏰' : ''}
+                            className={`time-slot ${slots.includes(s) ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}
+                            onClick={() => !disabled && toggleSlot(s)}
+                            title={past ? 'Horario ya pasado' : taken ? `Reservado por ${(taken as any).user?.name || 'otro colaborador'}` : ''}>
+                            {s} {taken ? '🔒' : past ? '⏰' : ''}
+                            {taken && <div style={{ fontSize: 10, opacity: 0.8 }}>{(taken as any).user?.name || 'Ocupada'}</div>}
                         </div>
                     );
                 })}
@@ -867,22 +937,17 @@ function BookingPage() {
             {overCapacity && (
                 <p style={{ fontSize: 12, color: 'var(--danger)', marginBottom: 20 }}>La sala admite máximo {amenity.capacity} personas.</p>
             )}
-            {slot && (
+            {slots.length > 0 && (
                 <div className="card" style={{ marginBottom: 16 }}>
                     <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Resumen</h4>
-                    <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📍 {amenity.name}</p>
-                    <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📅 {date}</p>
-                    <p style={{ fontSize: 13, color: 'var(--text-2)' }}>🕐 {slot}</p>
+                    <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📍 {amenity.name}{amenity.location ? ` · ${amenity.location}` : ''}</p>
+                    <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📅 {shortDayLabel(date)} · 🕐 {slots.join(', ')} ({slots.length} h)</p>
                     {motivo.trim() && <p style={{ fontSize: 13, color: 'var(--text-2)' }}>📝 {motivo.trim()}</p>}
                     {attendeesNum > 0 && <p style={{ fontSize: 13, color: 'var(--text-2)' }}>👥 {attendeesNum} asistentes</p>}
-                    <p style={{ fontSize: 13, color: 'var(--accent)', marginTop: 4 }}>+{amenity.points_reward || 10} puntos al cumplir la reunión</p>
-                    <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 6, fontFamily: 'monospace' }}>
-                        Recibirás un código correlativo C1-Rxxxx al confirmar.
-                    </p>
                 </div>
             )}
-            <button className="btn btn-primary btn-full" disabled={!slot || !motivo.trim() || overCapacity || loading || dateBlocked} onClick={handleBook}>
-                {loading ? 'Reservando…' : dateBlocked ? 'Fecha bloqueada' : 'Confirmar Reserva'}
+            <button className="btn btn-primary btn-full" disabled={slots.length === 0 || !motivo.trim() || overCapacity || loading || dateBlocked} onClick={handleBook}>
+                {loading ? 'Reservando…' : dateBlocked ? 'Fecha bloqueada' : slots.length > 1 ? `Confirmar ${slots.length} bloques` : 'Confirmar reserva'}
             </button>
         </div>
     );
@@ -936,9 +1001,10 @@ function MyReservationsPage() {
     );
 }
 
-// ─── CommunityPage ───
+// ─── CommunityPage (Muro) ───
+// Íconos SVG (components/Icons) en lugar de emojis.
 function CommunityPage() {
-    const { user, toast, go, refreshUser } = useApp();
+    const { user, toast, refreshUser } = useApp();
     const [posts, setPosts] = useState<Post[]>([]);
     const [text, setText] = useState('');
     const [likedIds, setLikedIds] = useState<string[]>([]);
@@ -956,9 +1022,8 @@ function CommunityPage() {
     if (!user?.community_id) return (
         <div className="empty-state fade-in">
             <span className="material-symbols-outlined">domain</span>
-            <h3>Aún no estás afiliado a una sede</h3>
-            <p style={{ margin: '8px 0' }}>Afíliate a tu sede ADR para ver las salas, reservar y participar en el muro</p>
-            <button className="btn btn-primary" onClick={() => go('join-community')}>Afiliarme a una sede</button>
+            <h3>Cuenta en configuración</h3>
+            <p style={{ margin: '8px 0' }}>Pide al administrador de salas que habilite tu cuenta.</p>
         </div>
     );
 
@@ -1009,24 +1074,27 @@ function CommunityPage() {
         return `${Math.floor(m / 1440)}d`;
     };
 
+    const iconBtn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6 };
+
     return (
         <div className="fade-in">
-            <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>forum</span> Muro ADR</h2>
+            <h2 className="section-title"><IconForum size={22} style={{ color: 'var(--accent)' }} /> Muro ADR</h2>
             <div className="card" style={{ marginBottom: 16 }}>
-                <textarea className="input" placeholder="Comparte un aviso con tu sede (salas, equipos, novedades)…" value={text} onChange={e => setText(e.target.value)} rows={2} />
+                <textarea className="input" placeholder="Comparte un aviso (salas, equipos, novedades)…" value={text} onChange={e => setText(e.target.value)} rows={2} />
                 {postImage && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, padding: '4px 8px', background: 'var(--bg-3)', borderRadius: 8, fontSize: 12 }}>
-                        📷 {postImage.name.slice(0, 20)}
-                        <button style={{ marginLeft: 'auto', cursor: 'pointer', background: 'none', border: 'none', color: 'var(--text-3)' }} onClick={() => setPostImage(null)}>✕</button>
+                        <IconPhoto size={16} /> {postImage.name.slice(0, 24)}
+                        <button style={{ marginLeft: 'auto', cursor: 'pointer', background: 'none', border: 'none', color: 'var(--text-3)', display: 'flex' }}
+                            onClick={() => setPostImage(null)} title="Quitar foto"><IconClose size={16} /></button>
                     </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                    <button className="btn btn-primary btn-sm" onClick={() => createPost()}>Publicar</button>
-                    <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
-                        📷 Foto
+                    <button className="btn btn-primary btn-sm" style={iconBtn} onClick={() => createPost()}><IconMegaphone size={16} /> Publicar</button>
+                    <label className="btn btn-ghost btn-sm" style={{ ...iconBtn, cursor: 'pointer' }}>
+                        <IconPhoto size={16} /> Foto
                         <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) setPostImage(e.target.files[0]); }} />
                     </label>
-                    <button className="btn btn-ghost btn-sm" onClick={() => createPost('BUG_REPORT')}>🐛 Reportar</button>
+                    <button className="btn btn-ghost btn-sm" style={iconBtn} onClick={() => createPost('BUG_REPORT')}><IconBug size={16} /> Reportar</button>
                 </div>
             </div>
             {posts.map(p => (
@@ -1035,17 +1103,20 @@ function CommunityPage() {
                         <div className="avatar">{p.user?.avatar_url ? <img src={p.user.avatar_url} alt="" /> : (p.user?.name?.[0] || '?')}</div>
                         <div className="post-header-info">
                             <h4>{p.user?.name || 'Colaborador'}</h4>
-                            <span>{timeAgo(p.created_at)} {p.post_type === 'BUG_REPORT' && '• 🐛 Bug Report'}</span>
+                            <span style={iconBtn}>
+                                {timeAgo(p.created_at)}
+                                {p.post_type === 'BUG_REPORT' && <> · <IconBug size={13} /> Reporte</>}
+                            </span>
                         </div>
                     </div>
                     <p className="post-text">{p.text}</p>
                     {p.image_url && <img className="post-image" src={p.image_url} alt="" />}
                     <div className="post-actions">
                         <button className={`post-action-btn ${likedIds.includes(p.id) ? 'liked' : ''}`} onClick={() => toggleLike(p.id)}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{likedIds.includes(p.id) ? 'favorite' : 'favorite_border'}</span> {p.likes_count}
+                            <IconHeart size={18} filled={likedIds.includes(p.id)} /> {p.likes_count}
                         </button>
                         <button className="post-action-btn" onClick={() => setShowComments(showComments === p.id ? null : p.id)}>
-                            <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chat_bubble_outline</span> {p.comments?.length || 0}
+                            <IconComment size={18} /> {p.comments?.length || 0}
                         </button>
                     </div>
                     {showComments === p.id && (
@@ -1058,7 +1129,7 @@ function CommunityPage() {
                             ))}
                             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                                 <input className="input" placeholder="Comentar..." value={commentText} onChange={e => setCommentText(e.target.value)} style={{ fontSize: 13 }} />
-                                <button className="btn btn-primary btn-sm" onClick={() => addComment(p.id)}>Enviar</button>
+                                <button className="btn btn-primary btn-sm" style={iconBtn} onClick={() => addComment(p.id)} title="Enviar"><IconSend size={16} /></button>
                             </div>
                         </div>
                     )}
@@ -1071,33 +1142,16 @@ function CommunityPage() {
 // ─── LeaderboardPage ───
 function LeaderboardPage() {
     const { user } = useApp();
-    const [tab, setTab] = useState<'towers' | 'users'>('towers');
-    const [communities, setCommunities] = useState<Community[]>([]);
     const [users, setUsers] = useState<User[]>([]);
 
     useEffect(() => {
-        api.getCommunityLeaderboard().then(setCommunities);
         if (user?.community_id) api.getCommunityUsers(user.community_id).then(setUsers);
     }, [user]);
-
-    const maxPts = tab === 'towers' ? Math.max(...communities.map(c => c.total_points), 1) : Math.max(...users.map(u => u.points), 1);
     return (
         <div className="fade-in">
             <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--accent)' }}>leaderboard</span> Clasificación</h2>
-            <div className="leaderboard-tabs">
-                <button className={`leaderboard-tab ${tab === 'towers' ? 'active' : ''}`} onClick={() => setTab('towers')}>🏢 Sedes</button>
-                <button className={`leaderboard-tab ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>👥 Mi sede</button>
-            </div>
-            {tab === 'towers' ? communities.map((c, i) => (
-                <div key={c.id} className="leaderboard-item stagger-item">
-                    <div className={`leaderboard-rank ${i < 3 ? `top-${i + 1}` : ''}`}>{i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</div>
-                    <div className="leaderboard-info">
-                        <h4>{c.name}</h4>
-                        <div className="leaderboard-bar"><div className="leaderboard-bar-fill" style={{ width: `${(c.total_points / maxPts) * 100}%` }} /></div>
-                    </div>
-                    <div className="leaderboard-points">{c.total_points}</div>
-                </div>
-            )) : users.map((u, i) => (
+            <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>Se suman puntos cuando el administrador califica tus reuniones como cumplidas (sala usada y dejada en orden).</p>
+            {users.map((u, i) => (
                 <div key={u.id} className="leaderboard-item stagger-item">
                     <div className={`leaderboard-rank ${i < 3 ? `top-${i + 1}` : ''}`}>{i < 3 ? ['🥇', '🥈', '🥉'][i] : i + 1}</div>
                     <div className="avatar" style={{ width: 36, height: 36, fontSize: 14 }}>{u.avatar_url ? <img src={u.avatar_url} alt="" /> : u.name[0]}</div>
@@ -1125,6 +1179,7 @@ function ProfilePage() {
     const [dni, setDni] = useState(user?.dni || '');
     const [phone, setPhone] = useState(user?.phone || '');
     const [cargoEdit, setCargoEdit] = useState(user?.cargo || '');
+    const [areaEdit, setAreaEdit] = useState(user?.apartment || '');
     const cartillaComplete = !!(user?.dni && user?.phone && user?.cargo);
 
     const saveCartilla = async () => {
@@ -1139,7 +1194,7 @@ function ProfilePage() {
             return;
         }
         try {
-            const updated = await api.updateUserProfile(user.id, { dni: dni || undefined, phone: phone || undefined, cargo: cargoEdit.trim() || undefined });
+            const updated = await api.updateUserProfile(user.id, { dni: dni || undefined, phone: phone || undefined, cargo: cargoEdit.trim() || undefined, apartment: areaEdit || undefined });
             setUser(updated);
             setShowCartilla(false);
             toast('✅ Datos actualizados');
@@ -1213,7 +1268,7 @@ function ProfilePage() {
                         {user?.name} <span className="material-symbols-outlined" style={{ fontSize: 16, color: 'var(--text-3)' }}>edit</span>
                     </div>
                 )}
-                <div className="profile-email">{user?.email}</div>
+                <div className="profile-email">{user?.username || user?.email}</div>
                 <div style={{ marginTop: 8 }}><span className="badge badge-primary">{level.icon} {level.name}</span></div>
                 <div className="profile-stats">
                     <div className="profile-stat"><div className="profile-stat-value">{user?.points || 0}</div><div className="profile-stat-label">Puntos</div></div>
@@ -1230,7 +1285,7 @@ function ProfilePage() {
                             {cartillaComplete ? '✅ Ficha completa' : '📝 Completa tu ficha'}
                         </h4>
                         <p style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                            {cartillaComplete ? 'Datos del colaborador registrados' : 'Cargo, DNI y celular del colaborador'}
+                            {cartillaComplete ? 'Datos del colaborador registrados' : 'Área, cargo, DNI y celular'}
                         </p>
                     </div>
                     <button className="btn btn-sm btn-ghost" onClick={() => setShowCartilla(!showCartilla)}>
@@ -1239,6 +1294,13 @@ function ProfilePage() {
                 </div>
                 {showCartilla && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <label style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4, display: 'block' }}>Área</label>
+                            <select className="input" value={areaEdit} onChange={e => setAreaEdit(e.target.value)}>
+                                <option value="">Selecciona tu área…</option>
+                                {ADR_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
+                            </select>
+                        </div>
                         <div style={{ gridColumn: '1 / -1' }}>
                             <label style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4, display: 'block' }}>Cargo</label>
                             <input className="input" list="adr-cargos-perfil" placeholder="Ej: Analista de Mejora Continua" value={cargoEdit} onChange={e => setCargoEdit(e.target.value)} maxLength={80} />
@@ -1267,206 +1329,19 @@ function ProfilePage() {
                 ))
             }
             <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {!user?.community_id && <button className="btn btn-primary btn-full" onClick={() => go('join-community')}>Afiliarme a una sede</button>}
+                <button className="btn btn-ghost btn-full" onClick={() => go('change-password')}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 18 }}>lock_reset</span> Cambiar contraseña
+                </button>
                 <button className="btn btn-danger btn-full" onClick={logout}>Cerrar sesión</button>
             </div>
         </div>
     );
 }
 
-// ─── JoinCommunityPage (Afiliación a sede ADR) ───
-function JoinCommunityPage() {
-    const { user, setUser, go, toast, viewData } = useApp();
-    const [communities, setCommunities] = useState<Community[]>([]);
-    const [selected, setSelected] = useState('');
-    // Área y cargo del colaborador: el área se elige de una lista para evitar
-    // duplicidad por digitación (las sanciones se aplican por área).
-    const [area, setArea] = useState(user?.apartment || '');
-    const [cargo, setCargo] = useState(user?.cargo || '');
-    const [loading, setLoading] = useState(false);
-    // Quién puede registrar sedes:
-    //  - SUPER_ADMIN: siempre (dueño de la plataforma y asigna admins).
-    //  - ADMIN: solo si aún NO administra una sede. Al registrarla se vuelve su
-    //    admin, y la regla es "un solo admin por sede".
-    //  - USER: nunca; solo puede afiliarse. El Super Admin debe activarlo como
-    //    ADMIN primero (panel Super Admin → cambiar rol).
-    const isAdmin = user?.role === 'ADMIN';
-    const isSuperAdmin = user?.role === 'SUPER_ADMIN';
-    const alreadyRunsCommunity = isAdmin && !!user?.community_id;
-    const canCreate = isSuperAdmin || (isAdmin && !alreadyRunsCommunity);
-    const [createMode, setCreateMode] = useState(canCreate && (viewData?.createMode || false));
-    const [newName, setNewName] = useState('');
-    // Ubicación vía mapa + selects en cascada (LocationPicker): evita errores
-    // de digitación en dirección/distrito/provincia y guarda lat/lng.
-    const [newLoc, setNewLoc] = useState(EMPTY_LOCATION);
-    const [newType, setNewType] = useState<'OFICINA' | 'PLANTA' | 'FUNDO'>('OFICINA');
-
-    useEffect(() => { api.getCommunities().then(setCommunities); }, []);
-
-    const submitJoin = async () => {
-        if (!selected || !user) return;
-        if (!area) { toast('Selecciona tu área'); return; }
-        if (!cargo.trim()) { toast('Indica tu cargo'); return; }
-        setLoading(true);
-        try {
-            await api.createJoinRequest({
-                community_id: selected, user_email: user.email, user_name: user.name,
-                unit: area, cargo: cargo.trim(),
-            });
-            // Guardamos el cargo en el perfil desde ya (el área se asigna al aprobar).
-            if (cargo.trim() !== (user.cargo || '')) {
-                const updated = await api.updateUserProfile(user.id, { cargo: cargo.trim() });
-                setUser(updated);
-            }
-            toast('✅ Solicitud enviada. El administrador de la sede debe aprobarla.');
-            go('home');
-        } catch (e: any) {
-            toast(e?.message || 'Error al enviar solicitud');
-        }
-        setLoading(false);
-    };
-
-    const locationComplete = !!newLoc.address.trim() && !!newLoc.district.trim() && !!newLoc.province.trim();
-
-    const submitCreate = async () => {
-        if (!newName.trim() || !user) return;
-        // Defensa en cliente: aunque la UI ya oculta el modo crear, revalidamos
-        // el rol y la regla de "un admin por sede" antes de pegarle a la API.
-        if (!isAdmin && !isSuperAdmin) {
-            toast('🔒 Solo un administrador puede registrar sedes. Pide al Super Admin que te active como administrador.');
-            return;
-        }
-        if (alreadyRunsCommunity) {
-            toast('🏢 Ya eres administrador de una sede. Solo puede haber un admin por sede.');
-            return;
-        }
-        if (!locationComplete) {
-            toast('📍 Completa la ubicación: busca la dirección en el mapa y confirma distrito y provincia.');
-            return;
-        }
-        if (!area || !cargo.trim()) {
-            toast('Indica tu área y cargo');
-            return;
-        }
-        setLoading(true);
-        try {
-            const community = await api.createCommunity({
-                name: newName.trim(),
-                address: newLoc.address.trim(),
-                district: newLoc.district.trim(),
-                province: newLoc.province.trim(),
-                map_lat: newLoc.lat,
-                map_lng: newLoc.lng,
-                community_type: newType,
-                admin_email: user.email,
-            });
-            const updated = await api.updateUserProfile(user.id, {
-                community_id: community.id, role: 'ADMIN', apartment: area, cargo: cargo.trim(),
-            });
-            setUser(updated);
-            toast('✅ Sede registrada. ¡Eres el administrador!');
-            go('home');
-        } catch (e: any) { toast('Error: ' + (e.message || 'No se pudo registrar')); }
-        setLoading(false);
-    };
-
-    const labelStyle = { fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' } as const;
-
-    const areaCargoFields = (
-        <>
-            <label className="stagger-item" style={labelStyle}>Área</label>
-            <select className="input stagger-item" value={area} onChange={e => setArea(e.target.value)} style={{ marginBottom: 12 }}>
-                <option value="">Selecciona tu área…</option>
-                {ADR_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-            <label className="stagger-item" style={labelStyle}>Cargo</label>
-            <input className="input stagger-item" list="adr-cargos-afiliacion" placeholder="Ej: Jefe de Mantenimiento"
-                value={cargo} onChange={e => setCargo(e.target.value)} maxLength={80} style={{ marginBottom: 16 }} />
-            <datalist id="adr-cargos-afiliacion">{ADR_CARGOS_SUGERIDOS.map(c => <option key={c} value={c} />)}</datalist>
-        </>
-    );
-
-    return (
-        <div className="fade-in">
-            <button className="btn btn-ghost btn-sm" onClick={() => go('home')} style={{ marginBottom: 12 }}>
-                <span className="material-symbols-outlined">arrow_back</span> Volver
-            </button>
-            {canCreate && (
-                <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                    <button className={`btn btn-full ${!createMode ? 'btn-primary' : 'btn-ghost'}`}
-                        style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(false)}>Afiliarme a sede</button>
-                    <button className={`btn btn-full ${createMode ? 'btn-primary' : 'btn-ghost'}`}
-                        style={{ borderRadius: 0, flex: 1 }} onClick={() => setCreateMode(true)}>Registrar sede</button>
-                </div>
-            )}
-            {!createMode ? (
-                <>
-                    <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }} className="stagger-item">Afiliarme a una sede ADR</h3>
-                    <label className="stagger-item" style={labelStyle}>Sede</label>
-                    <select className="input stagger-item" value={selected} onChange={e => setSelected(e.target.value)} style={{ marginBottom: 12 }}>
-                        <option value="">Selecciona una sede activa…</option>
-                        {communities.filter(c => c.is_active !== false).map(c => (
-                            <option key={c.id} value={c.id}>{c.name} — {communityTypeLabel(c.community_type)} · {c.district || c.address || ''}</option>
-                        ))}
-                    </select>
-
-                    {areaCargoFields}
-
-                    <button className="btn btn-primary btn-full stagger-item" onClick={submitJoin} disabled={!selected || !area || !cargo.trim() || loading}>
-                        {loading ? 'Enviando…' : '📨 Enviar solicitud'}
-                    </button>
-                    <p className="stagger-item" style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 12, textAlign: 'center' }}>
-                        Recibirás un código <strong>C1-Sxxxx</strong> y el administrador de la sede gestionará tu solicitud.
-                    </p>
-                </>
-            ) : (
-                <>
-                    <h3 className="stagger-item" style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Registrar sede nueva</h3>
-                    <p className="stagger-item" style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 16 }}>Serás el <strong>administrador</strong> único de esta sede y de sus salas.</p>
-
-                    <label className="stagger-item" style={labelStyle}>Tipo de sede</label>
-                    <div className="stagger-item" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 12 }}>
-                        {[
-                            { value: 'OFICINA' as const, label: '🏢 Oficina' },
-                            { value: 'PLANTA' as const, label: '🏭 Planta' },
-                            { value: 'FUNDO' as const, label: '🌱 Fundo' },
-                        ].map(t => (
-                            <button key={t.value} type="button"
-                                className={`btn btn-sm ${newType === t.value ? 'btn-primary' : 'btn-ghost'}`}
-                                style={{ fontSize: 12, padding: '8px 4px' }}
-                                onClick={() => setNewType(t.value)}>{t.label}</button>
-                        ))}
-                    </div>
-
-                    <label className="stagger-item" style={labelStyle}>Nombre</label>
-                    <input className="input stagger-item" placeholder="Ej: Oficina Central ADR" value={newName} onChange={e => setNewName(e.target.value)} style={{ marginBottom: 12 }} />
-
-                    <div className="stagger-item">
-                        <LocationPicker value={newLoc} onChange={setNewLoc} />
-                    </div>
-
-                    {areaCargoFields}
-
-                    <button className="btn btn-primary btn-full" onClick={submitCreate} disabled={!newName.trim() || !locationComplete || !area || !cargo.trim() || loading}>
-                        {loading ? 'Registrando...' : 'Registrar sede y ser admin'}
-                    </button>
-                    {!locationComplete && (
-                        <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 8, textAlign: 'center' }}>
-                            📍 Falta la ubicación: busca la dirección en el mapa y confirma distrito y provincia.
-                        </p>
-                    )}
-                </>
-            )}
-        </div>
-    );
-}
-
-
 // ─── AdminPage ───
 function AdminPage() {
     const { user, go, toast } = useApp();
-    const [view, setView] = useState<'menu' | 'users' | 'audit' | 'requests' | 'analytics' | 'spaces' | 'rules'>('menu');
-    const [allUsers, setAllUsers] = useState<User[]>([]);
+    const [view, setView] = useState<'menu' | 'users' | 'audit' | 'requests' | 'analytics' | 'spaces' | 'rules'>('spaces');
     const [reservations, setReservations] = useState<Reservation[]>([]);
     const [requests, setRequests] = useState<any[]>([]);
     const [analytics, setAnalytics] = useState<any>(null);
@@ -1477,19 +1352,24 @@ function AdminPage() {
     const [rejectMsg, setRejectMsg] = useState('');
     const [areaUserCounts, setAreaUserCounts] = useState<Record<string, number>>({}); // área -> colaboradores
 
-    // Create space form state
+    // Formulario de sala (crear o editar)
+    const [editingId, setEditingId] = useState<string | null>(null);
     const [spaceName, setSpaceName] = useState('');
     const [spaceType, setSpaceType] = useState('');
     const [spaceCapacity, setSpaceCapacity] = useState('8');
     const [spaceDesc, setSpaceDesc] = useState('');
+    const [spaceLocation, setSpaceLocation] = useState('');
+    const [spaceEquipment, setSpaceEquipment] = useState<string[]>([]);
     const [spacePoints, setSpacePoints] = useState('10');
     const [spaceImageFile, setSpaceImageFile] = useState<File | null>(null);
+    const [spaceGallery, setSpaceGallery] = useState<string[]>([]);       // fotos ya guardadas
+    const [spaceGalleryFiles, setSpaceGalleryFiles] = useState<File[]>([]); // fotos por subir
     const [spaceLoading, setSpaceLoading] = useState(false);
 
     // Imagen por defecto según el tipo de sala
     const DEFAULT_IMAGES: Record<string, string> = {
         'DIRECTORIO': 'https://images.unsplash.com/photo-1431540015161-0bf868a2d407?w=800',
-        'REUNIONES': 'https://images.unsplash.com/photo-1517502884422-41eaead166d4?w=800',
+        'REUNIONES': DEFAULT_ROOM_IMG,
         'CAPACITACION': 'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=800',
         'VIDEOCONFERENCIA': 'https://images.unsplash.com/photo-1600508774634-4e11d34730e2?w=800',
         'AUDITORIO': 'https://images.unsplash.com/photo-1505373877841-8d25f7d46678?w=800',
@@ -1497,21 +1377,13 @@ function AdminPage() {
         'OTRO': 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800',
     };
 
-    const SPACE_PRESETS = [
-        { type: 'DIRECTORIO', label: '👔 Sala de Directorio', desc: 'Mesa ejecutiva, pantalla y videoconferencia', cap: 14 },
-        { type: 'REUNIONES', label: '🤝 Sala de Reuniones', desc: 'Sala estándar con TV y pizarra', cap: 8 },
-        { type: 'CAPACITACION', label: '🎓 Sala de Capacitación', desc: 'Proyector, sonido y mesas modulares', cap: 30 },
-        { type: 'VIDEOCONFERENCIA', label: '🎥 Videoconferencia', desc: 'Cámara, micrófono y pantalla para Teams', cap: 6 },
-        { type: 'AUDITORIO', label: '🎤 Auditorio', desc: 'Escenario, sonido y butacas', cap: 80 },
-        { type: 'FOCUS', label: '💬 Sala Focus', desc: 'Sala pequeña para 1 a 1 o llamadas', cap: 3 },
-        { type: 'OTRO', label: '📦 Otra', desc: '', cap: 8 },
-    ];
+    // Carga inicial: el panel abre directo en "Salas"
+    useEffect(() => { if (isAdminRole(user)) api.getAmenities(user!.community_id, true).then(setAmenities); }, []);
 
-    if (user?.role !== 'ADMIN') return <div className="empty-state"><p>Acceso denegado</p></div>;
+    if (!isAdminRole(user) || !user) return <div className="empty-state"><p>Acceso denegado</p></div>;
 
     const load = async (v: string) => {
         setView(v as any);
-        if (v === 'users') api.getAllUsers().then(setAllUsers);
         if (v === 'audit') api.getAllReservationsForAudit(user.community_id).then(setReservations);
         if (v === 'requests' && user.community_id) {
             const reqs = await api.getPendingRequests(user.community_id);
@@ -1523,7 +1395,7 @@ function AdminPage() {
             setAreaUserCounts(counts);
         }
         if (v === 'analytics') api.getAnalytics(user.community_id).then(setAnalytics);
-        if (v === 'spaces') api.getAmenities(user.community_id).then(setAmenities);
+        if (v === 'spaces') api.getAmenities(user.community_id, true).then(setAmenities);
     };
 
     const grade = async (id: string, g: 'CUMPLIDA' | 'INCUMPLIDA') => {
@@ -1549,49 +1421,86 @@ function AdminPage() {
         toast('Solicitud rechazada');
     };
 
-    const selectPreset = (preset: typeof SPACE_PRESETS[0]) => {
-        setSpaceType(preset.type);
-        setSpaceName(preset.label.replace(/^[^\s]+\s/, '')); // Remove emoji prefix
-        setSpaceDesc(preset.desc);
-        setSpaceCapacity(String(preset.cap));
+    const resetForm = () => {
+        setShowCreateSpace(false); setEditingId(null);
+        setSpaceName(''); setSpaceType(''); setSpaceDesc(''); setSpaceLocation(''); setSpaceEquipment([]);
+        setSpaceCapacity('8'); setSpacePoints('10'); setSpaceImageFile(null);
+        setSpaceGallery([]); setSpaceGalleryFiles([]);
     };
 
-    const createSpace = async () => {
+    const selectPreset = (preset: typeof ROOM_TYPES[0]) => {
+        setSpaceType(preset.type);
+        if (!editingId) {
+            if (!spaceName.trim()) setSpaceName(preset.label);
+            setSpaceDesc(preset.desc);
+            setSpaceCapacity(String(preset.cap));
+        }
+    };
+
+    const startEdit = (a: Amenity) => {
+        setEditingId(a.id);
+        setSpaceName(a.name); setSpaceType(a.amenity_type || 'OTRO'); setSpaceDesc(a.description || '');
+        setSpaceLocation(a.location || ''); setSpaceEquipment(a.equipment || []);
+        setSpaceCapacity(String(a.capacity || 8)); setSpacePoints(String(a.points_reward ?? 10));
+        setSpaceImageFile(null);
+        setSpaceGallery(a.gallery || []); setSpaceGalleryFiles([]);
+        setShowCreateSpace(true);
+        window.scrollTo(0, 0);
+    };
+
+    const toggleEquipment = (k: string) =>
+        setSpaceEquipment(eq => eq.includes(k) ? eq.filter(x => x !== k) : [...eq, k]);
+
+    const saveSpace = async () => {
         if (!spaceName.trim() || !user?.community_id) return;
         setSpaceLoading(true);
         try {
-            let imageUrl = DEFAULT_IMAGES[spaceType] || DEFAULT_IMAGES['OTRO'];
-
-            // Create the amenity first
-            const newAmenity = await api.createAmenity({
-                community_id: user.community_id,
+            const fields: Partial<Amenity> = {
                 name: spaceName.trim(),
                 amenity_type: spaceType || 'OTRO',
                 capacity: parseInt(spaceCapacity) || 8,
                 description: spaceDesc.trim(),
-                image_url: imageUrl,
-                points_reward: parseInt(spacePoints) || 10,
-            });
-
-            // If a custom image was uploaded, update with real photo
-            if (spaceImageFile) {
-                const uploadedUrl = await api.uploadAmenityImage(newAmenity.id, spaceImageFile);
-                await api.updateAmenity(newAmenity.id, { image_url: uploadedUrl });
-                newAmenity.image_url = uploadedUrl;
+                location: spaceLocation.trim() || undefined,
+                equipment: spaceEquipment,
+                points_reward: parseInt(spacePoints) || 0,
+                gallery: spaceGallery,
+            };
+            let saved: Amenity;
+            if (editingId) {
+                saved = await api.updateAmenity(editingId, fields);
+            } else {
+                saved = await api.createAmenity({
+                    ...fields, community_id: user.community_id,
+                    image_url: DEFAULT_IMAGES[spaceType] || DEFAULT_IMAGES['OTRO'],
+                });
             }
-
-            setAmenities(prev => [...prev, newAmenity]);
-            toast('✅ Sala creada correctamente');
-            // Reset form
-            setShowCreateSpace(false);
-            setSpaceName(''); setSpaceType(''); setSpaceDesc('');
-            setSpaceCapacity('8'); setSpacePoints('10'); setSpaceImageFile(null);
-        } catch (e: any) { toast('Error: ' + (e.message || 'No se pudo crear')); }
+            if (spaceImageFile) {
+                const uploadedUrl = await api.uploadAmenityImage(saved.id, spaceImageFile);
+                saved = await api.updateAmenity(saved.id, { image_url: uploadedUrl });
+            }
+            if (spaceGalleryFiles.length) {
+                const urls: string[] = [];
+                for (const f of spaceGalleryFiles) urls.push(await api.uploadAmenityImage(saved.id, f));
+                saved = await api.updateAmenity(saved.id, { gallery: [...(saved.gallery || []), ...urls] });
+            }
+            setAmenities(prev => editingId ? prev.map(a => a.id === saved.id ? saved : a) : [...prev, saved]);
+            toast(editingId ? '✅ Sala actualizada' : '✅ Sala creada');
+            resetForm();
+        } catch (e: any) { toast('Error: ' + api.friendlyError(e)); }
         setSpaceLoading(false);
     };
 
+    const toggleSpaceActive = async (a: Amenity) => {
+        const next = a.is_active === false;
+        try {
+            const saved = await api.updateAmenity(a.id, { is_active: next });
+            setAmenities(prev => prev.map(x => x.id === a.id ? saved : x));
+            toast(next ? 'Sala habilitada' : 'Sala deshabilitada (no se podrá reservar)');
+        } catch (e: any) { toast('Error: ' + api.friendlyError(e)); }
+    };
+
     const deleteSpace = async (id: string) => {
-        if (!confirm('¿Eliminar esta sala? Las reservas existentes se perderán.')) return;
+        if (!confirm('¿Eliminar esta sala y todo su historial de reservas? Si solo quieres que no se reserve, usa "Deshabilitar".')) return;
         try {
             await api.deleteAmenity(id);
             setAmenities(prev => prev.filter(a => a.id !== id));
@@ -1608,18 +1517,36 @@ function AdminPage() {
         } catch { toast('Error al subir imagen'); }
     };
 
+    // Galería en el formulario: se guarda al pulsar "Guardar cambios"
+    const addGalleryFiles = (files: FileList | null) => {
+        const imgs = Array.from(files || []).filter(f => f.type.startsWith('image/'));
+        const total = spaceGallery.length + spaceGalleryFiles.length + imgs.length;
+        if (total > 12) { toast('Máximo 12 fotos por sala'); return; }
+        setSpaceGalleryFiles(prev => [...prev, ...imgs]);
+    };
+    const makeCover = async (url: string) => {
+        if (!editingId) return;
+        const current = amenities.find(a => a.id === editingId);
+        const rest = spaceGallery.filter(u => u !== url);
+        const gallery = current?.image_url ? [current.image_url, ...rest] : rest;
+        try {
+            const saved = await api.updateAmenity(editingId, { image_url: url, gallery });
+            setAmenities(prev => prev.map(a => a.id === saved.id ? saved : a));
+            setSpaceGallery(gallery);
+            toast('Portada actualizada');
+        } catch (e: any) { toast('Error: ' + api.friendlyError(e)); }
+    };
+
     if (view === 'menu') return (
         <div className="fade-in">
             <h2 className="section-title"><span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>admin_panel_settings</span> Panel Admin</h2>
-            {[{ icon: 'meeting_room', title: 'Salas', desc: 'Crear y gestionar salas de reunión', v: 'spaces' },
-            { icon: 'people', title: 'Colaboradores', desc: 'Usuarios, áreas y cargos', v: 'users' },
-            { icon: 'qr_code_scanner', title: 'Validar QR', desc: 'Escanear acceso de colaboradores y visitantes', v: 'qr-validate' },
-            { icon: 'fact_check', title: 'Auditoría', desc: 'Calificar uso de las salas', v: 'audit' },
-            { icon: 'mail', title: 'Solicitudes', desc: 'Aprobar afiliaciones a la sede', v: 'requests' },
-            { icon: 'gavel', title: 'Reglas', desc: 'Sanciones por área y restricciones', v: 'rules' },
-            { icon: 'analytics', title: 'Analytics', desc: 'Dashboard', v: 'analytics' }
+            {[{ icon: 'meeting_room', title: 'Salas', desc: 'Agregar, editar o quitar salas y sus fotos', v: 'spaces' },
+            { icon: 'fact_check', title: 'Auditoría', desc: 'Calificar el uso de las salas', v: 'audit' },
+            { icon: 'gavel', title: 'Reglas', desc: 'Sanciones por área y restricciones por sala', v: 'rules' },
+            { icon: 'people', title: 'Colaboradores', desc: 'Crear usuarios, restablecer claves, activar/desactivar', v: 'users' },
+            { icon: 'analytics', title: 'Indicadores', desc: 'Uso y cumplimiento por sala', v: 'analytics' }
             ].map(item => (
-                <div key={item.v} className="admin-card" onClick={() => item.v === 'qr-validate' ? go('qr-validate') : load(item.v)}>
+                <div key={item.v} className="admin-card" onClick={() => load(item.v)}>
                     <div className="admin-card-icon"><span className="material-symbols-outlined">{item.icon}</span></div>
                     <div className="admin-card-info"><h4>{item.title}</h4><p>{item.desc}</p></div>
                     <span className="material-symbols-outlined" style={{ color: 'var(--text-3)' }}>chevron_right</span>
@@ -1646,38 +1573,35 @@ function AdminPage() {
                 <span className="material-symbols-outlined">arrow_back</span> Panel Admin
             </button>
 
-            {/* ─── Spaces Management ─── */}
+            {/* ─── Gestión de salas ─── */}
             {view === 'spaces' && (<>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                     <h2 className="section-title" style={{ marginBottom: 0 }}>Salas ({amenities.length})</h2>
-                    <button className="btn btn-primary btn-sm" onClick={() => setShowCreateSpace(!showCreateSpace)}>
+                    <button className="btn btn-primary btn-sm" onClick={() => showCreateSpace ? resetForm() : setShowCreateSpace(true)}>
                         <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{showCreateSpace ? 'close' : 'add'}</span>
-                        {showCreateSpace ? 'Cancelar' : 'Crear'}
+                        {showCreateSpace ? 'Cancelar' : 'Nueva sala'}
                     </button>
                 </div>
 
-                {/* Create form */}
                 {showCreateSpace && (
                     <div className="card" style={{ padding: 20, marginBottom: 20 }}>
-                        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Nueva sala</h3>
+                        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{editingId ? 'Editar sala' : 'Nueva sala'}</h3>
 
-                        {/* Preset selector */}
                         <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 8, display: 'block' }}>Tipo de sala</label>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 16 }}>
-                            {SPACE_PRESETS.map(p => (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 6, marginBottom: 16 }}>
+                            {ROOM_TYPES.map(p => (
                                 <button key={p.type}
                                     className={`btn btn-sm ${spaceType === p.type ? 'btn-primary' : 'btn-ghost'}`}
-                                    style={{ fontSize: 12, padding: '8px 4px', whiteSpace: 'nowrap' }}
+                                    style={{ fontSize: 12, padding: '8px 6px', justifyContent: 'flex-start' }}
                                     onClick={() => selectPreset(p)}>
-                                    {p.label}
+                                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{p.icon}</span>{p.label}
                                 </button>
                             ))}
                         </div>
 
-                        {/* Preview image */}
                         {spaceType && (
                             <div style={{ marginBottom: 16, position: 'relative' }}>
-                                <img src={spaceImageFile ? URL.createObjectURL(spaceImageFile) : (DEFAULT_IMAGES[spaceType] || DEFAULT_IMAGES['OTRO'])}
+                                <img src={spaceImageFile ? URL.createObjectURL(spaceImageFile) : (editingId ? (amenities.find(a => a.id === editingId)?.image_url || DEFAULT_IMAGES['OTRO']) : (DEFAULT_IMAGES[spaceType] || DEFAULT_IMAGES['OTRO']))}
                                     alt="preview" style={{ width: '100%', height: 160, objectFit: 'cover', borderRadius: 12 }} />
                                 <label style={{ position: 'absolute', bottom: 8, right: 8, background: 'var(--primary)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
                                     <span className="material-symbols-outlined" style={{ fontSize: 16, color: '#fff' }}>photo_camera</span>
@@ -1687,16 +1611,70 @@ function AdminPage() {
                             </div>
                         )}
 
-                        <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Nombre</label>
-                        <input className="input" placeholder="Ej: Sala Arándano — 2.º piso" value={spaceName} onChange={e => setSpaceName(e.target.value)} style={{ marginBottom: 12 }} />
+                        {spaceType && (
+                            <div style={{ marginBottom: 16 }}>
+                                <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>
+                                    Más fotos ({spaceGallery.length + spaceGalleryFiles.length}/12)
+                                </label>
+                                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                    {spaceGallery.map(url => (
+                                        <div key={url} style={{ position: 'relative', width: 84, height: 64 }}>
+                                            <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
+                                            <button type="button" title="Quitar foto" onClick={() => setSpaceGallery(g => g.filter(u => u !== url))}
+                                                style={{ position: 'absolute', top: 2, right: 2, width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.65)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+                                            </button>
+                                            {editingId && (
+                                                <button type="button" title="Usar como portada" onClick={() => makeCover(url)}
+                                                    style={{ position: 'absolute', bottom: 2, left: 2, padding: '1px 6px', borderRadius: 6, border: 'none', background: 'rgba(0,0,0,0.65)', color: '#fff', cursor: 'pointer', fontSize: 10 }}>
+                                                    Portada
+                                                </button>
+                                            )}
+                                        </div>
+                                    ))}
+                                    {spaceGalleryFiles.map((f, i) => (
+                                        <div key={i} style={{ position: 'relative', width: 84, height: 64 }}>
+                                            <img src={URL.createObjectURL(f)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, opacity: 0.8 }} />
+                                            <button type="button" title="Quitar foto" onClick={() => setSpaceGalleryFiles(fs => fs.filter((_, j) => j !== i))}
+                                                style={{ position: 'absolute', top: 2, right: 2, width: 22, height: 22, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.65)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <span className="material-symbols-outlined" style={{ fontSize: 14 }}>close</span>
+                                            </button>
+                                        </div>
+                                    ))}
+                                    <label style={{ width: 84, height: 64, borderRadius: 8, border: '1px dashed var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-3)', fontSize: 11 }}>
+                                        <span className="material-symbols-outlined" style={{ fontSize: 20 }}>add_photo_alternate</span>
+                                        Agregar
+                                        <input type="file" accept="image/*" multiple onChange={e => { addGalleryFiles(e.target.files); e.target.value = ''; }} style={{ display: 'none' }} />
+                                    </label>
+                                </div>
+                            </div>
+                        )}
 
-                        <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Descripción</label>
-                        <textarea className="input" placeholder="Equipamiento, ubicación, indicaciones..." value={spaceDesc} onChange={e => setSpaceDesc(e.target.value)}
+                        <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Nombre</label>
+                        <input className="input" placeholder="Ej: Sala Arándano" value={spaceName} onChange={e => setSpaceName(e.target.value)} style={{ marginBottom: 12 }} />
+
+                        <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Ubicación</label>
+                        <input className="input" placeholder="Ej: Oficina Planta Don Carlos · 2.º piso" maxLength={80} value={spaceLocation} onChange={e => setSpaceLocation(e.target.value)} style={{ marginBottom: 12 }} />
+
+                        <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Descripción / indicaciones</label>
+                        <textarea className="input" placeholder="Ej: Pedir llave en recepción. Dejar la sala ordenada." maxLength={300} value={spaceDesc} onChange={e => setSpaceDesc(e.target.value)}
                             style={{ marginBottom: 12, minHeight: 60, resize: 'vertical' }} />
+
+                        <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 8, display: 'block' }}>Equipamiento</label>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+                            {ROOM_EQUIPMENT.map(e => (
+                                <button key={e.key} type="button"
+                                    className={`btn btn-sm ${spaceEquipment.includes(e.key) ? 'btn-accent' : 'btn-ghost'}`}
+                                    style={{ fontSize: 12, padding: '6px 10px' }}
+                                    onClick={() => toggleEquipment(e.key)}>
+                                    <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{e.icon}</span>{e.label}
+                                </button>
+                            ))}
+                        </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                             <div>
-                                <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Capacidad</label>
+                                <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-2)', marginBottom: 6, display: 'block' }}>Capacidad (personas)</label>
                                 <input className="input" type="number" min="1" value={spaceCapacity} onChange={e => setSpaceCapacity(e.target.value)} />
                             </div>
                             <div>
@@ -1705,27 +1683,26 @@ function AdminPage() {
                             </div>
                         </div>
 
-                        <button className="btn btn-primary btn-full" onClick={createSpace} disabled={!spaceName.trim() || !spaceType || spaceLoading}>
-                            {spaceLoading ? 'Creando...' : 'Crear sala'}
+                        <button className="btn btn-primary btn-full" onClick={saveSpace} disabled={!spaceName.trim() || !spaceType || spaceLoading}>
+                            {spaceLoading ? 'Guardando…' : editingId ? 'Guardar cambios' : 'Crear sala'}
                         </button>
                     </div>
                 )}
 
-                {/* Existing amenities list */}
                 {amenities.length === 0 && !showCreateSpace ? (
                     <div className="empty-state" style={{ padding: 40 }}>
                         <span className="material-symbols-outlined" style={{ fontSize: 48, color: 'var(--text-3)' }}>meeting_room</span>
                         <p style={{ fontSize: 16, fontWeight: 600, marginTop: 12 }}>No hay salas creadas</p>
-                        <p style={{ fontSize: 13, color: 'var(--text-3)' }}>Crea la primera sala de reunión de tu sede</p>
+                        <p style={{ fontSize: 13, color: 'var(--text-3)' }}>Crea la primera sala de reunión de ADR</p>
                         <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => setShowCreateSpace(true)}>
                             <span className="material-symbols-outlined" style={{ fontSize: 18 }}>add</span> Crear sala
                         </button>
                     </div>
                 ) : (
                     amenities.map(a => (
-                        <div key={a.id} className="card" style={{ marginBottom: 10, padding: 0, overflow: 'hidden' }}>
+                        <div key={a.id} className="card" style={{ marginBottom: 10, padding: 0, overflow: 'hidden', opacity: a.is_active === false ? 0.55 : 1 }}>
                             <div style={{ display: 'flex', gap: 12 }}>
-                                <div style={{ position: 'relative', width: 100, minHeight: 80, flexShrink: 0 }}>
+                                <div style={{ position: 'relative', width: 100, minHeight: 90, flexShrink: 0 }}>
                                     <img src={a.image_url || DEFAULT_IMAGES['OTRO']} alt={a.name}
                                         style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                     <label style={{ position: 'absolute', bottom: 4, right: 4, background: 'rgba(0,0,0,0.6)', borderRadius: 6, padding: 4, cursor: 'pointer' }}>
@@ -1736,39 +1713,36 @@ function AdminPage() {
                                         }} style={{ display: 'none' }} />
                                     </label>
                                 </div>
-                                <div style={{ flex: 1, padding: '10px 10px 10px 0' }}>
-                                    <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>{a.name}</h4>
-                                    <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 4 }}>{a.description}</p>
-                                    <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-2)' }}>
+                                <div style={{ flex: 1, padding: '10px 0', minWidth: 0 }}>
+                                    <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>
+                                        {a.name} {a.is_active === false && <span className="badge badge-danger" style={{ fontSize: 10 }}>Deshabilitada</span>}
+                                    </h4>
+                                    {a.location && <p style={{ fontSize: 12, color: 'var(--text-3)' }}>📍 {a.location}</p>}
+                                    <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-2)', margin: '4px 0' }}>
                                         <span>👥 {a.capacity}</span>
-                                        <span>⭐ +{a.points_reward} pts</span>
-                                        <span>📦 {a.amenity_type}</span>
+                                        <span>{roomTypeLabel(a.amenity_type)}</span>
+                                        <span>{1 + (a.gallery?.length || 0)} foto{(a.gallery?.length || 0) ? 's' : ''}</span>
                                     </div>
+                                    <EquipmentChips equipment={a.equipment} small />
                                 </div>
-                                <button onClick={() => deleteSpace(a.id)}
-                                    style={{ padding: '0 12px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', flexShrink: 0, alignSelf: 'stretch', display: 'flex', alignItems: 'center' }}>
-                                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>delete</span>
-                                </button>
+                                <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', paddingRight: 6 }}>
+                                    <button className="icon-btn" title="Editar" onClick={() => startEdit(a)}>
+                                        <span className="material-symbols-outlined" style={{ fontSize: 20 }}>edit</span>
+                                    </button>
+                                    <button className="icon-btn" title={a.is_active === false ? 'Habilitar' : 'Deshabilitar'} onClick={() => toggleSpaceActive(a)}>
+                                        <span className="material-symbols-outlined" style={{ fontSize: 20 }}>{a.is_active === false ? 'visibility' : 'visibility_off'}</span>
+                                    </button>
+                                    <button className="icon-btn" title="Eliminar" onClick={() => deleteSpace(a.id)} style={{ color: 'var(--danger)' }}>
+                                        <span className="material-symbols-outlined" style={{ fontSize: 20 }}>delete</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     ))
                 )}
             </>)}
 
-            {view === 'users' && (<>
-                <h2 className="section-title">Colaboradores ({allUsers.length})</h2>
-                {allUsers.map(u => (
-                    <div key={u.id} className="card" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div className="avatar">{u.name[0]}</div>
-                        <div style={{ flex: 1 }}>
-                            <h4 style={{ fontSize: 14 }}>{u.name}</h4>
-                            <p style={{ fontSize: 12, color: 'var(--text-2)' }}>{[u.cargo, u.apartment].filter(Boolean).join(' · ') || 'Sin área / cargo'}</p>
-                            <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{u.email} • {u.role}</p>
-                        </div>
-                        <span className={`badge ${u.status === 'ACTIVO' ? 'badge-accent' : 'badge-danger'}`}>{u.status}</span>
-                    </div>
-                ))}
-            </>)}
+            {view === 'users' && <UsersManager me={user} onToast={toast} />}
 
             {view === 'audit' && (<>
                 <h2 className="section-title">Auditoría</h2>
@@ -1847,12 +1821,12 @@ function AdminPage() {
             </>)}
 
             {view === 'analytics' && analytics && (<>
-                <h2 className="section-title">Dashboard</h2>
+                <h2 className="section-title">Indicadores</h2>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
                     {[{ label: 'Reservas', value: analytics.totalReservations, icon: 'event' },
                     { label: 'Ocupación', value: `${analytics.occupancyRate}%`, icon: 'trending_up' },
                     { label: 'Colaboradores', value: analytics.totalUsers, icon: 'people' },
-                    { label: 'Posts', value: analytics.totalPosts, icon: 'forum' }
+                    { label: 'Auditadas', value: analytics.auditedReservations, icon: 'fact_check' }
                     ].map(s => (
                         <div key={s.label} className="card" style={{ textAlign: 'center' }}>
                             <span className="material-symbols-outlined" style={{ color: 'var(--primary-light)' }}>{s.icon}</span>

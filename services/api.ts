@@ -1,21 +1,75 @@
 import { supabase } from './supabase';
+import { peruTodayISO, bookingMaxDateISO, addDaysISO } from './structure';
 import type {
     User, Community, Amenity, Reservation, Post, Comment,
     JoinRequest, PointLog, Sanction, Restriction, AuditLog, POINT_ACTIONS
 } from '../types';
 
-// ─── Auth ───
+// ─── Errores legibles ───
+// "Failed to fetch" significa que el navegador ni siquiera llegó a Supabase:
+// URL/clave mal configuradas, proyecto pausado o sin internet.
+export function friendlyError(e: any): string {
+    const msg: string = e?.message || String(e || '');
+    const low = msg.toLowerCase();
+    if (low.includes('failed to fetch') || low.includes('networkerror') || low.includes('load failed')) {
+        return 'No se pudo conectar con el servidor. Revisa tu internet o la configuración de Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY).';
+    }
+    if (msg.includes('Invalid login')) return 'Usuario o contraseña incorrectos';
+    if (low.includes('banned')) return 'Este usuario está desactivado. Contacta al administrador.';
+    if (low.includes('password should be at least')) return 'La contraseña debe tener al menos 6 caracteres';
+    if (low.includes('same_password') || low.includes('should be different')) return 'La nueva contraseña debe ser distinta a la anterior';
+    if (msg.includes('FUERA_DE_VENTANA:')) return msg.split('FUERA_DE_VENTANA:')[1].trim();
+    if (msg.includes('LIMITE_DIARIO:')) return msg.split('LIMITE_DIARIO:')[1].trim();
+    if (low.includes('reservations_no_collision') || low.includes('duplicate key')) return 'Ese horario acaba de ser reservado por otra persona. Elige otro.';
+    return msg || 'Error inesperado';
+}
 
-export async function signUp(email: string, password: string) {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+// ─── Auth ───
+// Mismo modelo que Integra Operaciones: el colaborador entra con usuario +
+// contraseña y el correo de Auth es técnico (no recibe correos). Las cuentas
+// las crea el admin con la Edge Function admin-usuarios.
+
+const DOMINIO_INTERNO = '@salas-adr.interno';
+
+/** Misma normalización que la Edge Function (sin tildes, espacios → punto).
+ *  Si escriben un correo (cuentas antiguas) se usa tal cual. */
+export function usuarioAEmail(usuario: string): string {
+    const u = String(usuario || '').trim().toLowerCase();
+    if (u.includes('@')) return u;
+    return u.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, '.') + DOMINIO_INTERNO;
+}
+
+export async function signIn(usuario: string, password: string) {
+    const { data, error } = await supabase.auth.signInWithPassword({ email: usuarioAEmail(usuario), password });
     if (error) throw error;
     return data;
 }
 
-export async function signIn(email: string, password: string) {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+/** Cambia la contraseña del usuario logueado y quita la marca de clave temporal. */
+export async function changeOwnPassword(userId: string, password: string): Promise<User> {
+    const { error } = await supabase.auth.updateUser({ password });
     if (error) throw error;
-    return data;
+    return updateUserProfile(userId, { must_change_password: false });
+}
+
+export interface AdminUsuariosResult {
+    ok: boolean;
+    perfil?: User;
+    usuario?: string;
+    nombre?: string;
+    password?: string;   // clave temporal generada (crear / reset)
+}
+
+/** Llama a la Edge Function admin-usuarios con la sesión del admin. */
+export async function adminUsuarios(body: Record<string, unknown>): Promise<AdminUsuariosResult> {
+    const { data, error } = await supabase.functions.invoke('admin-usuarios', { body });
+    if (error) {
+        let msg = error.message;
+        try { msg = (await (error as any).context.json()).error || msg; } catch { /* respuesta sin JSON */ }
+        throw new Error(msg);
+    }
+    if (data?.ok === false || data?.error) throw new Error(data.error || 'Error de servidor');
+    return data as AdminUsuariosResult;
 }
 
 export async function signOut() {
@@ -178,14 +232,15 @@ export async function getCommunityLeaderboard(): Promise<Community[]> {
 
 // ─── Amenities ───
 
-export async function getAmenities(communityId?: string): Promise<Amenity[]> {
+// Por defecto solo salas habilitadas; el panel admin pide también las desactivadas.
+export async function getAmenities(communityId?: string, includeInactive = false): Promise<Amenity[]> {
     let query = supabase.from('amenities').select('*');
     if (communityId) {
         query = query.eq('community_id', communityId);
     }
     const { data, error } = await query.order('name');
     if (error) throw error;
-    return data || [];
+    return (data || []).filter((a: Amenity) => includeInactive || a.is_active !== false);
 }
 
 export async function getAmenityById(amenityId: string): Promise<Amenity | null> {
@@ -250,8 +305,19 @@ export async function getUserReservations(userId: string): Promise<Reservation[]
 export async function getAmenityReservations(amenityId: string, date: string): Promise<Reservation[]> {
     const { data, error } = await supabase
         .from('reservations')
-        .select('*, user:users(name, email)')
+        .select('*, user:users(name, email, apartment)')
         .eq('amenity_id', amenityId)
+        .eq('date', date)
+        .neq('status', 'CANCELADA');
+    if (error) throw error;
+    return data || [];
+}
+
+// Ocupación de todas las salas en una fecha (tablero de disponibilidad).
+export async function getReservationsByDate(date: string): Promise<Reservation[]> {
+    const { data, error } = await supabase
+        .from('reservations')
+        .select('*, user:users(name, apartment)')
         .eq('date', date)
         .neq('status', 'CANCELADA');
     if (error) throw error;
@@ -513,29 +579,14 @@ export async function awardPoints(
     points: number,
     description?: string
 ): Promise<{ newPoints: number } | null> {
-    // Log the points (puede fallar por RLS si el caller no es admin/super; ahí
-    // confiamos en la RPC del lado servidor para los casos cruzados como LIKE_RECEIVED)
-    const { error: logError } = await supabase
-        .from('point_logs')
-        .insert({ user_id: userId, community_id: communityId, action, points, description });
-    if (logError) return null;
-
-    // Update user points
+    // Los puntos se suman en el servidor (RPC SECURITY DEFINER): el colaborador
+    // no puede editar su columna points directamente (trigger users_protect_columns).
+    const { error } = await supabase.rpc('award_points_to_user', {
+        recipient_id: userId, community: communityId, action_name: action, pts: points, reason: description ?? null,
+    });
+    if (error) return null;
     const { data: user } = await supabase.from('users').select('points').eq('id', userId).single();
-    let newPoints: number | null = null;
-    if (user) {
-        const updated = (user.points || 0) + points;
-        const { error: updErr } = await supabase.from('users').update({ points: updated }).eq('id', userId);
-        if (!updErr) newPoints = updated;
-    }
-
-    // Update community total points
-    const { data: community } = await supabase.from('communities').select('total_points').eq('id', communityId).single();
-    if (community) {
-        await supabase.from('communities').update({ total_points: (community.total_points || 0) + points }).eq('id', communityId);
-    }
-
-    return newPoints !== null ? { newPoints } : null;
+    return user ? { newPoints: user.points || 0 } : null;
 }
 
 // Refresca el usuario completo desde la BD. Útil tras awardPoints para que la UI
@@ -870,7 +921,7 @@ export async function getLastReservationByUser(
 // y devuelve restricciones para la UI del BookingPage.
 export interface Eligibility {
     minDate: string;        // YYYY-MM-DD
-    maxDate: string;        // YYYY-MM-DD (hoy + horizon)
+    maxDate: string;        // YYYY-MM-DD (hasta el domingo de la semana siguiente)
     blockedDates: string[]; // fechas bloqueadas por sanción/cooldown
     reasons: string[];      // mensajes amistosos
     canReserve: boolean;
@@ -879,109 +930,73 @@ export interface Eligibility {
 export async function getEligibility(
     user: User, amenityId: string,
 ): Promise<Eligibility> {
-    const today = new Date();
-    const todayISO = today.toISOString().split('T')[0];
+    // Fechas en hora Perú: la ventana es de hoy al domingo de la semana siguiente.
+    const todayISO = peruTodayISO();
+    const windowMax = bookingMaxDateISO();
+    const isAdmin = user.role === 'ADMIN' || user.role === 'SUPER_ADMIN';
 
     const reasons: string[] = [];
     const blockedDates: string[] = [];
-    let canReserve = true;
 
-    if (!user.community_id || !user.apartment) {
-        return { minDate: todayISO, maxDate: todayISO, blockedDates: [], reasons: ['Debes estar afiliado a una sede con tu área registrada'], canReserve: false };
+    if (!user.community_id) {
+        return { minDate: todayISO, maxDate: todayISO, blockedDates: [], reasons: ['Tu cuenta aún no está vinculada a ADR'], canReserve: false };
     }
 
-    // 1) Restricción de la amenidad (horizonte + cooldown)
+    // 1) Restricción de la sala (horizonte + cooldown); el horizonte nunca pasa de la ventana
     const restriction = await getRestriction(user.community_id, amenityId);
-    const horizonDays = restriction?.horizon_days ?? 30;
+    const horizonMax = addDaysISO(todayISO, restriction?.horizon_days ?? 30);
+    const maxDateISO = isAdmin ? horizonMax : (horizonMax < windowMax ? horizonMax : windowMax);
     const cooldownDays = restriction?.cooldown_days ?? 0;
     const cooldownHours = restriction?.cooldown_hours ?? 0;
 
-    const maxDate = new Date(today);
-    maxDate.setDate(maxDate.getDate() + horizonDays);
-    const maxDateISO = maxDate.toISOString().split('T')[0];
-
-    // 2) Cooldown desde la última reserva activa del colaborador
+    // 2) Cooldown desde la última reserva activa del colaborador en esta sala
     if (cooldownDays > 0 || cooldownHours > 0) {
         const last = await getLastReservationByUser(user.id, amenityId);
         if (last) {
-            const lastDate = new Date(last.date + 'T00:00:00');
-            const cutoff = new Date(lastDate);
-            cutoff.setDate(cutoff.getDate() + cooldownDays);
-            cutoff.setHours(cutoff.getHours() + cooldownHours);
-
-            // Bloquea desde lastDate hasta cutoff
-            const d = new Date(lastDate);
-            while (d <= cutoff) {
-                blockedDates.push(d.toISOString().split('T')[0]);
-                d.setDate(d.getDate() + 1);
-            }
-            reasons.push(
-                `Ya reservaste esta sala recientemente. Próxima fecha disponible: ${cutoff.toISOString().split('T')[0]}.`
-            );
+            const extra = cooldownDays + Math.ceil(cooldownHours / 24);
+            for (let i = 0; i <= extra; i++) blockedDates.push(addDaysISO(last.date, i));
+            reasons.push(`Ya reservaste esta sala recientemente. Próxima fecha disponible: ${addDaysISO(last.date, extra + 1)}.`);
         }
-        // Si NO existe última reserva, el PDF dice "el sistema asume que la última fue ayer".
-        // En la práctica esto no bloquea nada nuevo (cooldown desde ayer ya pasó),
-        // así que no añadimos restricciones extra.
     }
 
-    // 3) Sanciones activas (un solo SELECT para todo el rango)
-    const { data: sanctions } = await supabase
-        .from('sanctions')
-        .select('*')
-        .eq('community_id', user.community_id)
-        .eq('apartment', user.apartment)
-        .eq('amenity_id', amenityId)
-        .gte('end_date', todayISO);
+    // 3) Sanciones activas del área (si el colaborador tiene área registrada)
+    if (user.apartment) {
+        const { data: sanctions } = await supabase
+            .from('sanctions')
+            .select('*')
+            .eq('community_id', user.community_id)
+            .eq('apartment', user.apartment)
+            .eq('amenity_id', amenityId)
+            .gte('end_date', todayISO);
+        (sanctions || []).forEach((s: Sanction) => {
+            for (let d = s.start_date; d <= s.end_date; d = addDaysISO(d, 1)) blockedDates.push(d);
+            reasons.push(`Sanción activa para el área ${s.apartment} del ${s.start_date} al ${s.end_date}${s.reason ? ` — ${s.reason}` : ''}.`);
+        });
+    }
 
-    (sanctions || []).forEach((s: Sanction) => {
-        const start = new Date(s.start_date + 'T00:00:00');
-        const end = new Date(s.end_date + 'T00:00:00');
-        const d = new Date(start);
-        while (d <= end) {
-            blockedDates.push(d.toISOString().split('T')[0]);
-            d.setDate(d.getDate() + 1);
-        }
-        reasons.push(`Sanción activa para el área ${s.apartment} del ${s.start_date} al ${s.end_date}${s.reason ? ` — ${s.reason}` : ''}.`);
-    });
-
-    // Si todas las fechas del horizonte están bloqueadas, no puede reservar
-    const total = horizonDays + 1;
     const uniqueBlocked = new Set(blockedDates);
-    if (uniqueBlocked.size >= total) canReserve = false;
+    let open = 0;
+    for (let d = todayISO; d <= maxDateISO; d = addDaysISO(d, 1)) if (!uniqueBlocked.has(d)) open++;
 
     return {
         minDate: todayISO,
         maxDate: maxDateISO,
         blockedDates: Array.from(uniqueBlocked),
         reasons,
-        canReserve,
+        canReserve: open > 0,
     };
 }
 
-// ─── Validación de accesos QR (uso único de invitado) ───
-export interface GuestPassResult {
-    status: 'OK' | 'ALREADY_USED' | 'FORBIDDEN';
-    used_at?: string;
-    guest_name?: string;
-    apartment?: string;
-}
-
-// Marca un QR de invitado (identificado por su jti único) como usado y devuelve
-// el resultado. La lógica de uso único es atómica en el servidor (RPC).
-export async function validateGuestPass(
-    jti: string,
-    communityId: string,
-    apartment: string | null,
-    guestName: string | null,
-): Promise<GuestPassResult> {
-    const { data, error } = await supabase.rpc('validate_guest_pass', {
-        p_jti: jti,
-        p_community: communityId,
-        p_apartment: apartment,
-        p_guest_name: guestName,
-    });
-    if (error) throw error;
-    return data as GuestPassResult;
+/** Bloques activos que el colaborador ya tiene ese día (todas las salas). */
+export async function countUserSlotsOnDate(userId: string, date: string): Promise<number> {
+    const { count, error } = await supabase
+        .from('reservations')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('date', date)
+        .eq('status', 'ACTIVA');
+    if (error) return 0;
+    return count || 0;
 }
 
 export async function logAudit(action: string, entityType: string, entityId: string, metadata?: Record<string, any>) {
