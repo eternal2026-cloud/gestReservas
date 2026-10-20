@@ -1,4 +1,4 @@
--- Aplicada en salas-adr el 2026-10-20: se quitan los bloques 07:00-08:00 y 18:00-19:00.
+-- Aplicada en salas-adr el 2026-10-20: horario de 08:00 a 18:00 (sin 13:00-14:00).
 -- La lista de horarios debe coincidir con TIME_SLOTS en services/structure.ts.
 create or replace function public.reservations_check_rules()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -11,7 +11,7 @@ begin
   if new.status <> 'ACTIVA' then return new; end if;
   -- Misma lista que TIME_SLOTS en services/structure.ts
   if new.time_slot not in ('08:00-09:00','09:00-10:00','10:00-11:00','11:00-12:00','12:00-13:00',
-                           '14:00-15:00','15:00-16:00','16:00-17:00','17:00-18:00','19:00-20:00') then
+                           '14:00-15:00','15:00-16:00','16:00-17:00','17:00-18:00') then
     raise exception 'HORARIO_NO_DISPONIBLE: ese horario no está habilitado para reservas';
   end if;
   select role into rol from users where id = new.user_id;

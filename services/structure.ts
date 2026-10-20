@@ -48,11 +48,11 @@ export const ROOM_EQUIPMENT: { key: string; label: string; icon: string }[] = [
     { key: 'TELEFONO', label: 'Teléfono', icon: 'call' },
 ];
 
-/** Horarios reservables (bloques de 1 h, sin el refrigerio de 13:00 ni 07:00-08:00 / 18:00-19:00).
+/** Horarios reservables: 08:00 a 18:00 en bloques de 1 h, sin el refrigerio de 13:00.
  *  El trigger reservations_check_rules acepta solo esta misma lista. */
 export const TIME_SLOTS: string[] = [
     '08:00-09:00', '09:00-10:00', '10:00-11:00', '11:00-12:00', '12:00-13:00',
-    '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00', '19:00-20:00',
+    '14:00-15:00', '15:00-16:00', '16:00-17:00', '17:00-18:00',
 ];
 
 /** Fecha y hora actual en Perú (UTC-5, sin horario de verano). */
